@@ -115,6 +115,13 @@ def validate_candidate(
     if any(event.resolves_question for event in evidence):
         issues.add("contains_resolution")
 
+    # Hard constraint: cuts must never slice mid-event (e.g. mid-dialogue line)
+    for event in source_events:
+        if event.start_ms < candidate.start_ms < event.end_ms:
+            issues.add("slices_event_at_start")
+        if event.start_ms < candidate.end_ms < event.end_ms:
+            issues.add("slices_event_at_end")
+
     hook = source_by_id.get(candidate.hook_event_id)
     ending = source_by_id.get(candidate.end_event_id)
     if hook is None or hook.start_ms != candidate.start_ms:
@@ -123,6 +130,8 @@ def validate_candidate(
         issues.add("invalid_end_boundary")
     if hook is not None and hook.hook_strength < MIN_HOOK_STRENGTH:
         issues.add("weak_hook")
+    if hook is not None and (hook.start_ms - candidate.start_ms > 3000):
+        issues.add("hook_not_in_first_3_seconds")
     if ending is not None and not (
         ending.open_question
         or ending.tension >= MIN_ENDING_STRENGTH
@@ -246,6 +255,9 @@ def discover_promo_candidates(
         elif len(selected) >= max_selected:
             final.append(proposal.model_copy(update={"status": "not_selected"}))
         else:
+            assert MIN_DURATION_MS <= proposal.duration_ms <= MAX_DURATION_MS, (
+                f"Promo duration {proposal.duration_ms / 1000.0}s outside hard constraint [20.0s, 60.0s]"
+            )
             ranked = proposal.model_copy(
                 update={"status": "selected", "rank": len(selected) + 1}
             )
