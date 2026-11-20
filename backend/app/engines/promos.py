@@ -48,38 +48,114 @@ def _duration_fit(duration_ms: int) -> float:
     return max(0.0, 100.0 * (1 - abs(duration_ms - TARGET_DURATION_MS) / maximum_distance))
 
 
+def is_fragment_or_continuation(text: str) -> bool:
+    """Returns True if text is a sentence continuation or fragment that cannot open a standalone promo."""
+    clean = text.strip(' "\'()[]')
+    if not clean:
+        return False
+    if clean.startswith("...") or clean.startswith("…") or clean.startswith("--"):
+        return True
+    if clean[0].islower():
+        return True
+    first_word = clean.split()[0].lower()
+    conjunctions = {
+        "because", "and", "but", "so", "or", "which", "that", "since",
+        "yet", "nor", "though", "although", "while", "whereas"
+    }
+    if first_word in conjunctions:
+        return True
+    return False
+
+
+def is_mid_speech_turn(events: list[PromoSourceEvent], idx: int) -> bool:
+    """Returns True if the event is the continuation of a character's multi-sentence dialogue turn."""
+    current = events[idx]
+    if not current.character or current.event_type != "dialogue":
+        return False
+    if idx == 0:
+        return False
+    for prev_idx in range(idx - 1, -1, -1):
+        prev = events[prev_idx]
+        if prev.character == current.character and prev.event_type == "dialogue":
+            # If the gap between parts of the same speech is short (<= 3.5s) without another speaker
+            if current.start_ms - prev.end_ms <= 3500:
+                return True
+            break
+        if prev.character and prev.character != current.character and prev.event_type == "dialogue":
+            break
+    return False
+
+
+def is_cliffhanger_continuation_or_spoiler(
+    proposal: PromoCandidateDraft,
+    kept: PromoCandidateDraft,
+    events_by_id: dict[str, PromoSourceEvent],
+) -> bool:
+    """H7 check: promo cannot spoil another promo's cliffhanger or continue its sentence."""
+    # 1. Proposal plays through the resolution of kept's cliffhanger
+    if proposal.start_ms <= kept.end_ms < proposal.end_ms:
+        return True
+
+    # 2. Proposal starts immediately adjacent (within 3.5s) to kept's ending
+    if 0 <= proposal.start_ms - kept.end_ms <= 3500:
+        kept_end = events_by_id.get(kept.end_event_id)
+        prop_start = events_by_id.get(proposal.hook_event_id)
+        if kept_end and prop_start:
+            clean_end = kept_end.text.strip(' "\'()[]')
+            # If kept ended in an open question or unfinished sentence
+            if clean_end.endswith("?") or clean_end.endswith("...") or clean_end.endswith("…"):
+                return True
+            if is_fragment_or_continuation(prop_start.text):
+                return True
+            # If proposal opens on an immediate direct answer to kept's line
+            if kept_end.character and prop_start.character and kept_end.character != prop_start.character:
+                if prop_start.start_ms - kept_end.end_ms <= 2500:
+                    return True
+    return False
+
+
 def _score_candidate(
     start: PromoSourceEvent,
     end: PromoSourceEvent,
     evidence: list[PromoSourceEvent],
     duration_ms: int,
 ) -> tuple[float, PromoScoreComponents]:
-    tension = float(max(event.tension for event in evidence))
-    has_open_question = any(event.open_question for event in evidence)
-    
-    # Q7 / F5 fix: Calibrate curiosity spread based on unresolved cliffhanger strength
-    if end.open_question:
-        curiosity = round(min(98.0, 75.0 + end.hook_strength * 0.15 + end.tension * 0.10), 1)
-    elif has_open_question:
-        curiosity = round(min(86.0, 62.0 + tension * 0.25), 1)
-    else:
-        curiosity = round(max(40.0, float(end.hook_strength) * 0.75), 1)
+    tensions = [float(e.tension) for e in evidence]
+    max_tension = max(tensions)
+    avg_tension = mean(tensions)
+    trajectory_bonus = 3.0 if (len(tensions) >= 3 and tensions[-1] >= tensions[0]) else 0.0
+    tension = round(min(100.0, max(40.0, avg_tension * 0.4 + max_tension * 0.6 + trajectory_bonus)), 1)
 
-    ending = min(
-        100.0,
-        end.tension * 0.6
-        + end.hook_strength * 0.4
-        + (10.0 if end.open_question else 0.0),
-    )
-    # Q8 / F5 fix: Compute dynamic confidence from evidence signals
-    confidence = round(mean(event.confidence for event in evidence) * 100, 1)
+    clean_end = end.text.strip(' "\'()[]')
+    has_open_question = any(event.open_question for event in evidence)
+    if end.open_question or clean_end.endswith("?"):
+        curiosity = round(min(98.0, 78.0 + end.hook_strength * 0.12 + max_tension * 0.08), 1)
+    elif clean_end.endswith("...") or clean_end.endswith("…"):
+        curiosity = round(min(92.0, 70.0 + end.hook_strength * 0.10 + max_tension * 0.10), 1)
+    elif has_open_question:
+        curiosity = round(min(84.0, 60.0 + max_tension * 0.22), 1)
+    else:
+        curiosity = round(max(45.0, min(75.0, float(end.tension) * 0.65 + float(end.hook_strength) * 0.2)), 1)
+
+    clean_end_bonus = 8.0 if (clean_end.endswith("?") or clean_end.endswith("...")) else 0.0
+    ending = round(min(100.0, max(40.0, end.tension * 0.55 + end.hook_strength * 0.35 + clean_end_bonus)), 1)
+
+    clean_start = start.text.strip(' "\'()[]')
+    word_count = len(clean_start.split())
+    punchiness = 4.0 if 3 <= word_count <= 12 else (0.0 if word_count <= 20 else -4.0)
+    hook = round(min(100.0, max(40.0, float(start.hook_strength) + punchiness)), 1)
+
+    raw_conf = mean(event.confidence for event in evidence) * 100.0
+    confidence = round(min(98.0, max(50.0, raw_conf)), 1)
+    duration_fit = round(_duration_fit(duration_ms), 1)
+
     components = PromoScoreComponents(
-        hook=float(start.hook_strength),
+        hook=hook,
         tension=tension,
         curiosity=curiosity,
         ending=ending,
         confidence=confidence,
-        duration_fit=_duration_fit(duration_ms),
+        duration_fit=duration_fit,
     )
     score = (
         components.hook * 0.25
@@ -124,12 +200,13 @@ def validate_candidate(
     if any(event.resolves_question for event in evidence):
         issues.add("contains_resolution")
 
-    # Hard constraint: cuts must never slice mid-event (e.g. mid-dialogue line)
+    # Hard constraint: cuts must never slice a line of dialogue
     for event in source_events:
-        if event.start_ms < candidate.start_ms < event.end_ms:
-            issues.add("slices_event_at_start")
-        if event.start_ms < candidate.end_ms < event.end_ms:
-            issues.add("slices_event_at_end")
+        if event.event_type == "dialogue" or event.character:
+            if event.start_ms < candidate.start_ms < event.end_ms:
+                issues.add("slices_event_at_start")
+            if event.start_ms < candidate.end_ms < event.end_ms:
+                issues.add("slices_event_at_end")
 
     hook = source_by_id.get(candidate.hook_event_id)
     ending = source_by_id.get(candidate.end_event_id)
@@ -180,11 +257,18 @@ def discover_promo_candidates(
         raise PromoDiscoveryError("max_selected must be at least one")
 
     events = sorted(source_events, key=lambda event: (event.start_ms, event.end_ms, event.event_id))
+    events_by_id = {event.event_id: event for event in events}
     proposals: list[PromoCandidateDraft] = []
     for start_index, start in enumerate(events):
         if start.narrative_type in {"context", "resolution"}:
             continue
         if start.hook_strength < MIN_HOOK_STRENGTH or start.resolves_question:
+            continue
+        # Ban hooks that are sentence continuation fragments (e.g. starting with "..." or lowercase conjunction)
+        if is_fragment_or_continuation(start.text):
+            continue
+        # Ban hooks that slice into the middle of a character's multi-sentence dialogue turn
+        if is_mid_speech_turn(events, start_index):
             continue
 
         ending_options: list[PromoCandidateDraft] = []
@@ -273,12 +357,12 @@ def discover_promo_candidates(
             )
             continue
 
-        # H7: No promo contains the answer to another promo's cliffhanger
+        # H7: No promo contains the answer to another promo's cliffhanger or continues its sentence
         spoils_kept = next(
             (
                 kept
                 for kept in selected
-                if proposal.start_ms <= kept.end_ms < proposal.end_ms
+                if is_cliffhanger_continuation_or_spoiler(proposal, kept, events_by_id)
             ),
             None,
         )

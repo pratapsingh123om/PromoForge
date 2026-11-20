@@ -200,15 +200,25 @@ def update_candidate(
     "/promos/{candidate_id}",
     response_model=PromoCandidateResponse,
 )
+@router.patch(
+    "/episodes/{episode_key}/promos/{candidate_id}",
+    response_model=PromoCandidateResponse,
+)
+@router.post(
+    "/episodes/{episode_key}/promos/{candidate_id}",
+    response_model=PromoCandidateResponse,
+)
 def update_candidate_direct(
     candidate_id: str,
     payload: PromoCandidateUpdateRequest,
+    episode_key: str | None = None,
     session: Session = Depends(get_session),
 ) -> PromoCandidateResponse:
     return _handle_candidate_update(
         candidate_id=candidate_id,
         payload=payload,
         session=session,
+        episode_key=episode_key,
     )
 
 

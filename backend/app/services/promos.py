@@ -180,6 +180,9 @@ def generate_episode_promos(
                 open_question=narrative.open_question,
                 resolves_question=narrative.resolves_question,
                 confidence=narrative.confidence,
+                event_type=source.event_type,
+                character=source.character,
+                text=source.text,
             )
         )
     if not source_events:
@@ -268,9 +271,11 @@ def _recommendation_rationale(
             f"to {candidate.end_ms / 1000:.1f}s; every claim below maps back to those events."
         ),
     ]
-    open_questions = [item.open_question for item in evidence if item.open_question]
-    if open_questions:
-        rationale.append(f"Leaves an unresolved curiosity gap: {open_questions[0]}")
+    ending_ev = evidence[-1] if evidence else None
+    if ending_ev and ending_ev.open_question:
+        rationale.append(f"Cliffhanger leaves an unresolved curiosity gap: \"{ending_ev.open_question}\"")
+    elif open_questions:
+        rationale.append(f"Leaves an unresolved curiosity gap: \"{open_questions[-1]}\"")
     else:
         rationale.append(
             "Ends on a high-tension beat without including a model-identified resolution."

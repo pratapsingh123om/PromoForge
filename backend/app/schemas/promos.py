@@ -16,6 +16,9 @@ class PromoSourceEvent(BaseModel):
     open_question: str | None = None
     resolves_question: bool = False
     confidence: float = Field(ge=0, le=1)
+    event_type: str = ""
+    character: str | None = None
+    text: str = ""
 
     @model_validator(mode="after")
     def validate_range(self) -> "PromoSourceEvent":

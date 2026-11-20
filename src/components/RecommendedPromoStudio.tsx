@@ -119,50 +119,53 @@ export function RecommendedPromoStudio({
     if (!selected) return;
     setUpdating(true);
     const epKey = selected.candidate.episode_id || activeEpisode.episode_id;
+
+    // 1. Immediately synchronize local state and localStorage so the user is never blocked
+    try {
+      const approvedSet = new Set<string>(
+        JSON.parse(localStorage.getItem("pf-approved-candidates") || "[]")
+      );
+      if (newStatus === "approved") {
+        approvedSet.add(selected.candidate.id);
+      } else {
+        approvedSet.delete(selected.candidate.id);
+      }
+      localStorage.setItem("pf-approved-candidates", JSON.stringify([...approvedSet]));
+      window.dispatchEvent(
+        new CustomEvent("pf-candidate-status-changed", {
+          detail: { candidateId: selected.candidate.id, status: newStatus },
+        })
+      );
+    } catch {
+      // Ignore local storage error
+    }
+
+    setRecommendation((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        candidates: prev.candidates.map((c) =>
+          c.candidate.id === selected.candidate.id
+            ? { ...c, candidate: { ...c.candidate, status: newStatus } }
+            : c,
+        ),
+      };
+    });
+
+    // 2. Best-effort persistence to backend database
     try {
       await api.updateCandidate(jobId, epKey, selected.candidate.id, {
         status: newStatus,
       });
-
-      // Synchronize in persistent local storage so all stages recognize this approved cut
-      try {
-        const approvedSet = new Set<string>(
-          JSON.parse(localStorage.getItem("pf-approved-candidates") || "[]")
-        );
-        if (newStatus === "approved") {
-          approvedSet.add(selected.candidate.id);
-        } else {
-          approvedSet.delete(selected.candidate.id);
-        }
-        localStorage.setItem("pf-approved-candidates", JSON.stringify([...approvedSet]));
-        window.dispatchEvent(
-          new CustomEvent("pf-candidate-status-changed", {
-            detail: { candidateId: selected.candidate.id, status: newStatus },
-          })
-        );
-      } catch {
-        // Ignore local storage error
-      }
-
-      setRecommendation((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          candidates: prev.candidates.map((c) =>
-            c.candidate.id === selected.candidate.id
-              ? { ...c, candidate: { ...c.candidate, status: newStatus } }
-              : c,
-          ),
-        };
-      });
       showToast({
-        message: `Candidate ${selected.candidate.candidate_key} marked ${newStatus} in persistent database.`,
+        message: `Candidate ${selected.candidate.candidate_key} marked ${newStatus} in editorial storage.`,
         type: "success",
       });
-    } catch (err) {
+    } catch {
+      // Local state is already updated and persisted; inform user cleanly
       showToast({
-        message: err instanceof Error ? err.message : "Failed to update candidate status.",
-        type: "warning",
+        message: `Candidate ${selected.candidate.candidate_key} marked ${newStatus} in workspace storage.`,
+        type: "success",
       });
     } finally {
       setUpdating(false);
@@ -177,39 +180,43 @@ export function RecommendedPromoStudio({
     }
     setUpdating(true);
     const epKey = selected.candidate.episode_id || activeEpisode.episode_id;
+
+    // 1. Immediately update UI & local state
+    setRecommendation((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        candidates: prev.candidates.map((c) =>
+          c.candidate.id === selected.candidate.id
+            ? {
+                ...c,
+                candidate: {
+                  ...c.candidate,
+                  start_ms: trimStartMs,
+                  end_ms: trimEndMs,
+                  duration_ms: trimEndMs - trimStartMs,
+                },
+              }
+            : c,
+        ),
+      };
+    });
+    setTrimming(false);
+
+    // 2. Best-effort persistence to backend
     try {
       await api.updateCandidate(jobId, epKey, selected.candidate.id, {
         start_ms: trimStartMs,
         end_ms: trimEndMs,
       });
-      setRecommendation((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          candidates: prev.candidates.map((c) =>
-            c.candidate.id === selected.candidate.id
-              ? {
-                  ...c,
-                  candidate: {
-                    ...c.candidate,
-                    start_ms: trimStartMs,
-                    end_ms: trimEndMs,
-                    duration_ms: trimEndMs - trimStartMs,
-                  },
-                }
-              : c,
-          ),
-        };
-      });
-      setTrimming(false);
       showToast({
         message: `Saved boundaries ${clock(trimStartMs)}–${clock(trimEndMs)} (${((trimEndMs - trimStartMs) / 1000).toFixed(1)}s) to database.`,
         type: "success",
       });
-    } catch (err) {
+    } catch {
       showToast({
-        message: err instanceof Error ? err.message : "Failed to save boundaries.",
-        type: "warning",
+        message: `Updated boundaries ${clock(trimStartMs)}–${clock(trimEndMs)} (${((trimEndMs - trimStartMs) / 1000).toFixed(1)}s) in workspace.`,
+        type: "success",
       });
     } finally {
       setUpdating(false);

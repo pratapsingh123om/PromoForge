@@ -14,7 +14,12 @@ htmlcov/
 
 data/
 outputs/
+exports/
 *.db
 *.sqlite
 *.sqlite3
+
+# Confidential Screenplays & Archives (Do not commit)
+test_drama/
+*.zip
 

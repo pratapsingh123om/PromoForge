@@ -45,69 +45,90 @@ class RuleBasedNarrativeProvider(LLMProvider):
         )
 
     def _classify(self, event: SourceEventReference) -> NarrativeEventAnalysis:
-        text = event.text.strip()
+        text = event.text.strip(' "\'')
         lowered = text.lower()
         is_question = "?" in text
-        is_interrupted = text.rstrip('"').rstrip().endswith("...")
+        is_exclamation = "!" in text
+        is_interrupted = text.endswith("...") or text.endswith("…")
         characters = [event.character] if event.character else []
+        words = lowered.split()
+        word_count = len(words)
 
-        # 1. High-impact spoken rejection, abandonment, or betrayal (Top hook priority)
-        if any(word in lowered for word in ("cannot marry", "not marry", "marrying me", "abandon", "refuse", "disgrace", "humiliate", "beneath the future")):
-            narrative_type = NarrativeType.CONFLICT
-            appeal = "betrayal"
-            tension = 88
-            hook_strength = 92
-            confidence = 0.90
-        elif any(word in lowered for word in ("kill", "destroy", "threat", "never let", "pay for this")):
-            narrative_type = NarrativeType.THREAT
-            appeal = "danger"
-            tension = 84
-            hook_strength = 88
-            confidence = 0.88
-        elif any(word in lowered for word in ("secret", "truth", "actually", "identity", "revealed")):
-            narrative_type = NarrativeType.REVELATION
-            appeal = "mystery"
-            tension = 78
-            hook_strength = 82
-            confidence = 0.85
-        elif any(word in lowered for word in ("betray", "hate", "leave", "liar", "no!", "dignity", "ashamed")):
-            narrative_type = NarrativeType.CONFLICT
-            appeal = "conflict"
-            tension = 76
-            hook_strength = 78
-            confidence = 0.82
-        elif is_question:
-            narrative_type = NarrativeType.OPEN_QUESTION
-            appeal = "curiosity"
-            tension = 72
-            # F6 fix: Question is an end-point/cliffhanger signal, not a high shock opening
-            hook_strength = 68 if len(text.split()) > 3 else 55
-            confidence = 0.85
-        elif event.event_type == "dialogue":
-            narrative_type = NarrativeType.EMOTIONAL_TENSION
-            appeal = "emotion"
-            tension = 62
-            hook_strength = 66
-            confidence = 0.80
-        elif any(word in lowered for word in ("sudden", "blood", "slap", "gasps", "shocked", "weeps")):
-            # Q1/F1 fix: Action reactions should not trump spoken dialogue
-            narrative_type = NarrativeType.SHOCK
-            appeal = "shock"
-            tension = 70
-            hook_strength = 64
-            confidence = 0.75
+        # General structural drama patterns (not show-specific keyword overfitting)
+        has_negation = any(w in words for w in ("not", "cannot", "never", "won't", "refuse", "no"))
+        has_relational = any(w in lowered for w in ("marry", "wedding", "husband", "wife", "love", "trust", "promise", "family", "bride", "groom"))
+        has_threat = any(w in lowered for w in ("destroy", "kill", "ruin", "regret", "pay", "threat", "suffer", "punish"))
+        has_revelation = any(w in lowered for w in ("truth", "secret", "revealed", "discovered", "actually", "hidden", "unmasked", "identity"))
+        has_confrontation = any(w in lowered for w in ("betray", "abandon", "disgrace", "shame", "ashamed", "humiliate", "liar", "dignity", "coward"))
+
+        if event.event_type == "dialogue":
+            # 1. Catalytic relationship rejection / refusal
+            if has_negation and has_relational:
+                narrative_type = NarrativeType.CONFLICT
+                appeal = "betrayal"
+                tension = 85 + (3 if is_exclamation else 0)
+                hook_strength = 90 + (3 if 3 <= word_count <= 10 else 0)
+                confidence = 0.89
+            # 2. High-stakes threat or ultimatum
+            elif has_threat:
+                narrative_type = NarrativeType.THREAT
+                appeal = "danger"
+                tension = 83 + (3 if is_exclamation else 0)
+                hook_strength = 86 + (2 if is_exclamation else 0)
+                confidence = 0.87
+            # 3. Direct interpersonal confrontation or accusation
+            elif has_confrontation:
+                narrative_type = NarrativeType.CONFLICT
+                appeal = "conflict"
+                tension = 78 + (3 if is_exclamation else 0)
+                hook_strength = 80 + (2 if 4 <= word_count <= 12 else 0)
+                confidence = 0.84
+            # 4. Major narrative revelation
+            elif has_revelation:
+                narrative_type = NarrativeType.REVELATION
+                appeal = "mystery"
+                tension = 76
+                hook_strength = 82
+                confidence = 0.85
+            # 5. Open dramatic question
+            elif is_question:
+                narrative_type = NarrativeType.OPEN_QUESTION
+                appeal = "curiosity"
+                tension = 72 + (4 if word_count >= 5 else 0)
+                # Questions drive ending suspense, not top opening shock (F6 fix)
+                hook_strength = 68 if word_count >= 4 else 56
+                confidence = 0.85
+            # 6. General spoken dialogue
+            else:
+                narrative_type = NarrativeType.EMOTIONAL_TENSION
+                appeal = "emotion"
+                tension = 60 + min(12, word_count)
+                hook_strength = 64 + (4 if 3 <= word_count <= 10 else 0)
+                confidence = 0.81
         else:
-            narrative_type = NarrativeType.CONTEXT
-            appeal = "context"
-            tension = 40
-            hook_strength = 45
-            confidence = 0.70
+            # Non-dialogue physical/camera actions
+            if any(w in lowered for w in ("slap", "blood", "gun", "knife", "collapse", "gasps", "tears", "shocks")):
+                narrative_type = NarrativeType.SHOCK
+                appeal = "shock"
+                tension = 68
+                # Action beats have lower hook priority than spoken dialogue (Q1/F1 fix)
+                hook_strength = 58
+                confidence = 0.76
+            else:
+                narrative_type = NarrativeType.CONTEXT
+                appeal = "context"
+                tension = 42
+                hook_strength = 45
+                confidence = 0.70
 
-        # Q3/Q4/F3 fix: Identify resolution/closure statements
-        resolves_question = any(word in lowered for word in ("ashamed", "finally over", "accept it", "make peace", "victorious"))
-        
-        # Open question signal: explicit question mark or dramatic trailing hesitation ("...")
-        question = text.strip('"') if (is_question or (is_interrupted and not resolves_question)) else None
+        # Q3/Q4/F3: Resolution and closure statements that defuse suspense
+        resolves_question = any(
+            phrase in lowered
+            for phrase in ("accept it", "finally over", "make peace", "victorious", "it is finished", "forgive you", "i was the one who should be ashamed")
+        )
+
+        # Open question signal for cliffhangers: question mark or dramatic unresolved trail
+        question = text if (is_question or (is_interrupted and not resolves_question)) else None
 
         return NarrativeEventAnalysis(
             event_id=event.event_id,
