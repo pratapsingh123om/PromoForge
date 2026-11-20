@@ -1,4 +1,4 @@
-# Apex Reel: Evaluation Strategy
+# PromoForge — Evaluation Strategy
 
 Purpose: decide whether a promo is good, find where the tool picks badly, and map each failure to a fix.
 Scope: Problem 1 (find promos in microdrama screenplays). No code here, only checks, rules and procedures.
