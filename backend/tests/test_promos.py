@@ -391,3 +391,41 @@ def test_generation_is_persisted_grounded_and_cached(promo_session: Session) -> 
     assert recommendation.production_review_recommended is True
     assert all(item.evidence for item in recommendation.candidates)
     assert all(item.rationale for item in recommendation.candidates)
+
+    from app.api.promos import PromoCandidateUpdateRequest, export_promos, update_candidate
+
+    target_candidate = first.candidates[0]
+    updated = update_candidate(
+        job_id=job_id,
+        episode_key="EP_TEST",
+        candidate_id=target_candidate.id,
+        payload=PromoCandidateUpdateRequest(status="approved"),
+        session=promo_session,
+    )
+    assert updated.status == "approved"
+
+    json_export = export_promos(
+        job_id=job_id,
+        episode_key="EP_TEST",
+        format="json",
+        session=promo_session,
+    )
+    assert json_export.candidate_count >= 1
+    assert json_export.format == "json"
+    assert len(json_export.sha256) == 64
+
+    csv_export = export_promos(
+        job_id=job_id,
+        episode_key="EP_TEST",
+        format="csv",
+        session=promo_session,
+    )
+    assert "candidate_key,rank" in csv_export.content
+
+    otio_export = export_promos(
+        job_id=job_id,
+        episode_key="EP_TEST",
+        format="otio",
+        session=promo_session,
+    )
+    assert "OTIO_SCHEMA" in otio_export.content

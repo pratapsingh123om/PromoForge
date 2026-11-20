@@ -298,3 +298,40 @@ def test_queued_job_can_be_cancelled_and_retried(
         assert retried.status == "queued"
         assert retried.cancel_requested is False
 
+
+def test_series_name_slug_collision_matches_existing(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        proj1, created1 = get_or_create_project_by_name(session, "The CEO's Secret Vow")
+        assert created1 is True
+
+        proj2, created2 = get_or_create_project_by_name(session, "the-ceos-secret-vow!")
+        assert created2 is False
+        assert proj1.id == proj2.id
+
+
+def test_analysis_orchestration_runs_to_completion(
+    session_factory: sessionmaker[Session],
+) -> None:
+    from app.services.orchestration import process_analysis_job
+    from test_narrative import resolve_immediate
+
+    with session_factory() as session:
+        project = _import_synthetic_project(session)
+        job, _ = create_analysis_job(
+            session,
+            project_id=project.id,
+            idempotency_key="orch-test-1",
+        )
+        assert job.status == "queued"
+        job_id = job.id
+
+        resolve_immediate(process_analysis_job(job_id, session=session))
+
+        final_job = session.get(AnalysisJobRecord, job_id)
+        assert final_job is not None
+        assert final_job.status == "completed"
+        assert final_job.episodes_completed == final_job.episodes_total
+        assert final_job.progress_percent == 100
+

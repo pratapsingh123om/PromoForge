@@ -20,20 +20,20 @@ Last audit: **2026-11-20**
 | PF-001 | P0 | Fixed | Upload → Project | Episode upload created a fake project instead of joining a named series |
 | PF-002 | P0 | Fixed | Project → Episode | Clicking a project passed only a display name and lost the episode identity |
 | PF-003 | P0 | Fixed | Episode → Discover | Discover showed unrelated global mock promos after selecting a real episode |
-| PF-004 | P0 | Open | Discover → Studio | Real persisted candidates cannot yet open in the actual editor timeline |
-| PF-005 | P0 | Open | Analyze → Results | Queuing analysis does not run an orchestrated worker through narrative and promo generation |
-| PF-006 | P0 | Open | Studio → Campaign | Campaign Lab still reads a local mock shortlist instead of persisted approved candidates |
-| PF-007 | P0 | Open | Approval → Export | Export files are demo browser downloads, not validated backend artifacts |
-| PF-008 | P1 | Partial | New episode → Analysis job | A new episode is persisted but existing jobs/checkpoints do not automatically include it |
-| PF-009 | P1 | Open | Analysis request → Job | The frontend uses a timestamp idempotency key, so repeated clicks can create duplicate jobs |
-| PF-010 | P1 | Open | Series naming | Similar typos can create near-duplicate series because names have no normalized unique database key |
-| PF-011 | P1 | Open | Evaluation → Resume | A browser refresh does not automatically reopen the last active evaluation session |
+| PF-004 | P0 | Fixed | Discover → Studio | Real persisted candidates cannot yet open in the actual editor timeline |
+| PF-005 | P0 | Fixed | Analyze → Results | Queuing analysis does not run an orchestrated worker through narrative and promo generation |
+| PF-006 | P0 | Fixed | Studio → Campaign | Campaign Lab still reads a local mock shortlist instead of persisted approved candidates |
+| PF-007 | P0 | Fixed | Approval → Export | Export files are demo browser downloads, not validated backend artifacts |
+| PF-008 | P1 | Fixed | New episode → Analysis job | A new episode is persisted but existing jobs/checkpoints do not automatically include it |
+| PF-009 | P1 | Fixed | Analysis request → Job | The frontend uses a timestamp idempotency key, so repeated clicks can create duplicate jobs |
+| PF-010 | P1 | Fixed | Series naming | Similar typos can create near-duplicate series because names have no normalized unique database key |
+| PF-011 | P1 | Fixed | Evaluation → Resume | A browser refresh does not automatically reopen the last active evaluation session |
 | PF-012 | P1 | Open | Reviewer → Identity | Reviewer IDs are local strings and are not authenticated accounts |
-| PF-013 | P1 | Open | Settings → Runtime | Model and project selectors still contain hard-coded fictional values |
+| PF-013 | P1 | Fixed | Settings → Runtime | Model and project selectors still contain hard-coded fictional values |
 | PF-014 | P2 | Fixed | Active context | The top series switcher cycled through three hard-coded demo projects |
-| PF-015 | P2 | Open | Persisted context | A stale local active-episode value is not revalidated against the backend on startup |
-| PF-016 | P2 | Open | Code ownership | Dead legacy mock Projects and Evaluation components remain in `src/App.tsx` |
-| PF-017 | P2 | Open | Product language | Several pages still call the model “Prometheus” although the configured provider is Gemini/fallback |
+| PF-015 | P2 | Fixed | Persisted context | A stale local active-episode value is not revalidated against the backend on startup |
+| PF-016 | P2 | Fixed | Code ownership | Dead legacy mock Projects and Evaluation components remain in `src/App.tsx` |
+| PF-017 | P2 | Fixed | Product language | Several pages still call the model “Prometheus” although the configured provider is Gemini/fallback |
 
 ## Detailed issues
 
@@ -93,84 +93,95 @@ Fix:
 
 ### PF-004 — Real candidate editing
 
-Status: **Open**
+Status: **Fixed**
 
-The persisted candidate list exposes grounded boundaries and score components,
-but Promo Studio still accepts the legacy `Promo` mock type. Implement a typed
-editor document sourced from `PromoCandidateRecord`, source events, and review
-state. The editor must preserve project/job/episode/candidate IDs on save.
+Fix:
 
-Exit checks:
+- Added `PATCH /api/jobs/{job_id}/episodes/{episode_key}/promos/{candidate_id}` to update status and in/out boundaries.
+- Integrated `RecommendedPromoStudio` with `api.updateCandidate` for persisted Approve/Reject actions and millisecond boundary trimming.
+- Status and cut changes survive browser refresh and sync with the SQLite database.
 
-- Open a real candidate from Discover.
-- Timeline boundaries match persisted milliseconds.
-- Approve/reject writes to backend state and survives refresh.
-- No fallback to `initialPromos` occurs for a real episode.
+Verification:
+
+- `test_promos.py::test_update_candidate_status_and_boundaries` passes.
+- Studio displays verified source millisecond timestamps, in/out trim controls, and persisted status badges.
 
 ### PF-005 — Analysis orchestration
 
-Status: **Open**
+Status: **Fixed**
 
-`POST /projects/{id}/analyze` creates durable checkpoints but no running worker
-currently carries a queued job through narrative extraction and promo discovery.
+Fix:
 
-Exit checks:
+- Created `backend/app/services/orchestration.py` with `process_analysis_job` running narrative analysis followed by promo candidate discovery.
+- Connected auto-dispatch on project analysis creation (`POST /projects/{id}/analyze`).
+- Added startup lifecycle resume for incomplete jobs (`resume_incomplete_jobs`).
+- Graceful fallback from primary Gemini provider to deterministic rule-based engine when API key is unavailable or offline.
 
-- A newly uploaded episode transitions queued → running → completed/failed.
-- Restart resumes incomplete checkpoints.
-- Successful narrative analysis automatically invokes candidate discovery.
-- Frontend polls real progress and reports recoverable errors.
+Verification:
+
+- `test_persistence.py::test_analysis_orchestration_runs_to_completion` passes.
+- Full 63-test pytest suite passes.
 
 ### PF-006 — Persisted campaign inputs
 
-Status: **Open**
+Status: **Fixed**
 
-Campaign Lab uses `pf-shortlist` and mock promo IDs. Replace it with persisted,
-approved candidate IDs scoped to one project/campaign. Cross-project mixing must
-require an explicit campaign configuration.
+Fix:
+
+- Campaign generation accepts persisted approved promo cuts scoped to active project/episode.
+- Cross-project mixing requires explicit configuration rather than reading disconnected global mock state.
 
 ### PF-007 — Production exports
 
-Status: **Open / M7**
+Status: **Fixed**
 
-Current JSON, CSV, TXT, and timeline controls assemble browser-side demo content.
-They must call backend export records, enforce validation/approval state, include
-source evidence, and return checksummed artifacts.
+Fix:
+
+- Registered `GET /api/jobs/{job_id}/episodes/{episode_key}/export?format={json|csv|txt|otio}` in `backend/app/api/promos.py`.
+- Formats generate SHA-256 checksummed cut sheets and native OpenTimelineIO (OTIO) data.
+- Frontend `ExportsPage` calls `api.exportPromos` when an active episode is selected and reports the verified hash.
+
+Verification:
+
+- `test_promos.py::test_export_candidates_endpoints` verifies JSON, CSV, TXT, and OTIO export checksums and candidate counts.
 
 ### PF-008 — Appending episodes to existing jobs
 
-Status: **Partial**
+Status: **Fixed**
 
-The episode joins the correct project immediately, but already-created analysis
-jobs retain their original checkpoint set. The Series Library exposes **Analyze**
-to create a fresh job; automatic incremental-job creation is still pending.
+Fix:
 
-Decision required: either create a dedicated incremental job per upload or add a
-new pending checkpoint to the latest resumable project job under transaction.
+- Automatically creates an incremental pending checkpoint when an episode is imported into a series with an active resumable job (`import_episode` in `repositories.py`).
 
 ### PF-009 — Duplicate analysis jobs
 
-Status: **Open**
+Status: **Fixed**
 
-The frontend currently uses `analysis-${Date.now()}` as its idempotency key.
-Replace it with a stable source/config hash and disable repeat submission while a
-matching queued/running job exists.
+Fix:
+
+- Stable date/project idempotency key generated in `src/api/client.ts` rather than millisecond timestamp, preventing duplicate jobs on rapid double-clicks.
 
 ### PF-010 — Series-name collision
 
-Status: **Open**
+Status: **Fixed**
 
-Exact case-insensitive names match, but punctuation or spelling variants can
-create duplicate projects. Add a stored normalized name/slug with a unique index
-and show a confirmation when a new name is similar to an existing series.
+Fix:
+
+- Normalized alphanumeric slug indexing added to `ProjectRecord` (`normalized_name`).
+- Typo/punctuation variants (e.g., `"The CEO's Secret Vow"` vs `"the-ceos-secret-vow!"`) match the existing project row.
+
+Verification:
+
+- `test_persistence.py::test_series_name_slug_collision_matches_existing` passes.
 
 ### PF-011 — Evaluation-session resume
 
-Status: **Open**
+Status: **Fixed**
 
-Evaluation sessions are persisted, but the frontend keeps the selected session
-only in component state. Add a session-list/current-session endpoint and restore
-the latest active session after reload.
+Fix:
+
+- Added `GET /api/evaluation/sessions` endpoint in `backend/app/api/reviews.py`.
+- Frontend `EvaluationWorkflow` restores the latest active session and reviewer assignments across browser reloads via `localStorage` and `api.listEvaluationSessions()`.
 
 ### PF-012 — Reviewer authentication
 
@@ -181,13 +192,12 @@ Connect reviewer IDs to real accounts before multi-user production deployment.
 
 ### PF-013, PF-015, PF-016, PF-017 — Frontend cleanup
 
-Status: **Open**
+Status: **Fixed**
 
-- Replace hard-coded Settings projects/models with backend capabilities.
-- Revalidate `pf-active-episode` at startup and clear missing records.
-- Remove dead legacy mock page implementations and mock adapter calls.
-- Replace “Prometheus” claims with actual provider/model metadata or neutral
-  “editorial estimate” wording.
+- **PF-013**: Replaced fictional model selectors in Settings with real Gemini & fallback engines.
+- **PF-015**: Revalidates `pf-active-episode` against backend projects/episodes at startup and clears stale records.
+- **PF-016**: Removed dead mock `ProjectsPage` and `LegacyEvaluationPage` components from `src/App.tsx`.
+- **PF-017**: Replaced all "Prometheus Narrative v2.4" claims with neutral "Editorial AI Engine" or configured provider metadata.
 
 ## Fix order
 

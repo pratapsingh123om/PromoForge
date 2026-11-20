@@ -22,6 +22,12 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_database()
+    import asyncio
+    from app.services.orchestration import resume_incomplete_jobs
+    try:
+        asyncio.create_task(resume_incomplete_jobs())
+    except Exception:
+        pass
     yield
 
 app = FastAPI(

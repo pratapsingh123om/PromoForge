@@ -44,9 +44,7 @@ import {
 } from "lucide-react";
 import { api } from "./api/client";
 import {
-  evaluationRows,
   graphNodes,
-  projects as initialProjects,
   promos as initialPromos,
   transcript,
 } from "./data/mockData";
@@ -99,7 +97,7 @@ const navSections = [
 ];
 
 const defaultSettings: Settings = {
-  model: "Prometheus Narrative v2.4",
+  model: "gemini-3.1-flash-lite (Editorial Narrative Engine)",
   apiBaseUrl: "",
   hook: 40,
   cliffhanger: 30,
@@ -148,221 +146,6 @@ function download(name: string, content: string, type = "text/plain") {
   a.click();
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-// -------------------------------------------------------------
-// 1. PROJECTS PAGE
-// -------------------------------------------------------------
-function ProjectsPage({
-  onOpenStudio,
-  onNavigate,
-  showToast,
-}: {
-  onOpenStudio: (projectName: string) => void;
-  onNavigate: (page: PageId) => void;
-  showToast: (toast: Omit<ToastNotification, "id">) => void;
-}) {
-  const [items, setItems] = usePersistentState<Project[]>("pf-projects", initialProjects);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-  const [filter, setFilter] = useState<"all" | "ready" | "processing" | "failed">("all");
-
-  const retry = async (id: string) => {
-    const prevItems = [...items];
-    setItems((v) =>
-      v.map((p) =>
-        p.id === id ? { ...p, status: "processing", progress: 14, updated: "Retrying analysis..." } : p,
-      ),
-    );
-    showToast({
-      message: "Restarted story analysis pipeline for screenplay.",
-      type: "info",
-      undoAction: () => setItems(prevItems),
-    });
-    await api.retryAnalysis(id);
-  };
-
-  const upload = (file?: File) => {
-    if (!file) return;
-    setUploading(true);
-    setTimeout(() => {
-      const newProject: Project = {
-        id: `p${Date.now()}`,
-        name: file.name.replace(/\.[^.]+$/, "") || "Untitled Screenplay",
-        episodes: 12,
-        progress: 18,
-        status: "processing",
-        updated: "Ingesting scenes now",
-        logline: "Imported screenplay document awaiting character entity extraction.",
-      };
-      setItems((v) => [newProject, ...v]);
-      setUploading(false);
-      showToast({
-        message: `Uploaded "${newProject.name}" for narrative ingestion.`,
-        type: "success",
-      });
-    }, 800);
-  };
-
-  const addProject = () => {
-    const newProject: Project = {
-      id: `p${Date.now()}`,
-      name: `New Microdrama ${items.length + 1}`,
-      episodes: 24,
-      progress: 0,
-      status: "processing",
-      updated: "Created now",
-      logline: "Fictional microdrama screenplay series awaiting manuscript upload.",
-    };
-    setItems((v) => [newProject, ...v]);
-    showToast({
-      message: `Created project "${newProject.name}".`,
-      type: "success",
-    });
-  };
-
-  const visibleItems = filter === "all" ? items : items.filter((item) => item.status === filter);
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Workflow Step 1 / Workspace"
-        title="Screenplays & Narrative Ingestion"
-        description="Ingest scripts, index multi-episode story arcs, and prepare candidates for promo extraction."
-        actions={
-          <>
-            <Button variant="secondary" onClick={addProject}>
-              <Plus size={16} aria-hidden="true" /> New project
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-            >
-              <Upload size={16} aria-hidden="true" />
-              {uploading ? "Ingesting screenplay..." : "Upload screenplay"}
-            </Button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".pdf,.docx,.txt,.fountain"
-              hidden
-              onChange={(event) => {
-                upload(event.target.files?.[0]);
-                event.target.value = "";
-              }}
-            />
-          </>
-        }
-      />
-
-      <div className="metrics-grid">
-        <Metric label="Active Series" value="03" />
-        <Metric label="Episodes Indexed" value="146" />
-        <Metric label="Ranked Moments" value="284" delta="+32 ready" />
-        <Metric label="Analysis Health" value="98.4%" delta="Pipeline stable" />
-      </div>
-
-      <div className="section-title">
-        <div>
-          <h2>Project Library</h2>
-          <p>Verified editorial projects ready for promo extraction and campaign assembly.</p>
-        </div>
-        <label className="select-wrap compact-select">
-          <ListFilter size={15} aria-hidden="true" />
-          <select
-            value={filter}
-            onChange={(event) => setFilter(event.target.value as typeof filter)}
-            aria-label="Filter projects by status"
-          >
-            <option value="all">All statuses</option>
-            <option value="ready">Ready for extraction</option>
-            <option value="processing">Processing</option>
-            <option value="failed">Failed review</option>
-          </select>
-          <ChevronDown size={14} aria-hidden="true" />
-        </label>
-      </div>
-
-      <div className="project-list">
-        {visibleItems.map((project) => (
-          <article className="project-row" key={project.id}>
-            <div className="project-art">
-              <BookOpen size={22} aria-hidden="true" />
-              <span>{project.episodes} EP</span>
-            </div>
-            <div className="project-main">
-              <div className="project-title">
-                <h3>{project.name}</h3>
-                <Badge
-                  tone={
-                    project.status === "ready"
-                      ? "green"
-                      : project.status === "failed"
-                        ? "red"
-                        : "orange"
-                  }
-                >
-                  {project.status === "ready"
-                    ? "Ready"
-                    : project.status === "failed"
-                      ? "Needs action"
-                      : "Processing"}
-                </Badge>
-              </div>
-              <p>
-                {project.episodes} episodes · {project.updated}
-              </p>
-            </div>
-            <div className="progress-wrap">
-              <div>
-                <span>Story arc analysis</span>
-                <b>{project.progress}%</b>
-              </div>
-              <div className="progress" role="progressbar" aria-valuenow={project.progress} aria-valuemin={0} aria-valuemax={100}>
-                <i style={{ width: `${project.progress}%` }} />
-              </div>
-            </div>
-            <div className="stages">
-              {["Ingest", "Entities", "Narrative", "Ranking"].map((s, i) => (
-                <span className={project.progress >= (i + 1) * 25 ? "done" : ""} key={s}>
-                  {project.progress >= (i + 1) * 25 ? (
-                    <Check size={12} aria-hidden="true" />
-                  ) : (
-                    <CircleDot size={12} aria-hidden="true" />
-                  )}
-                  {s}
-                </span>
-              ))}
-            </div>
-            {project.status === "failed" ? (
-              <Button variant="danger" onClick={() => retry(project.id)}>
-                <Redo2 size={15} aria-hidden="true" /> Retry ingestion
-              </Button>
-            ) : (
-              <Button
-                variant={project.status === "ready" ? "primary" : "secondary"}
-                onClick={() => onOpenStudio(project.name)}
-              >
-                {project.status === "ready" ? "Explore moments" : "Review"}{" "}
-                <ChevronRight size={15} aria-hidden="true" />
-              </Button>
-            )}
-          </article>
-        ))}
-
-        {visibleItems.length === 0 && (
-          <Panel>
-            <div className="empty-state">
-              <ListFilter size={28} aria-hidden="true" />
-              <h3>No projects match this filter</h3>
-              <p>Change your filter to view all active screenplay projects.</p>
-            </div>
-          </Panel>
-        )}
-      </div>
-    </>
-  );
 }
 
 // -------------------------------------------------------------
@@ -572,7 +355,7 @@ function DiscoverPage({
       <PageHeader
         eyebrow="Workflow Step 2 / Discovery"
         title="Screenplay Moments Ranked for High Hook Retention"
-        description="Every candidate is grounded in verified dialogue beats and Prometheus v2.4 predictive retention scores."
+        description="Every candidate is grounded in verified dialogue beats and predictive narrative retention scores."
         actions={
           shortlist.length > 0 ? (
             <Button variant="primary" onClick={() => setPage("campaign")}>
@@ -1020,7 +803,7 @@ function StudioPage({
             </div>
 
             {/* Section 2: Model Estimates */}
-            <h4 className="insight-group-title">Model Estimates (Prometheus v2.4)</h4>
+            <h4 className="insight-group-title">Model Estimates (Editorial AI Engine)</h4>
             <div className="insight">
               <span>Hook Strength</span>
               <b>{promo.metrics.hookStrength}%</b>
@@ -1543,7 +1326,7 @@ function CampaignPage({
                         <span>Creative Comparison</span>
                         <b>Pre-launch Model Estimates</b>
                       </div>
-                      <Badge tone="purple">Estimated by Prometheus v2.4</Badge>
+                      <Badge tone="purple">Editorial AI Estimate</Badge>
                     </div>
                     <div className="comparison-grid">
                       {[
@@ -1617,14 +1400,47 @@ function CampaignPage({
 // -------------------------------------------------------------
 function ExportsPage({
   promos,
+  activeEpisode,
   showToast,
 }: {
   promos: Promo[];
+  activeEpisode?: ActiveEpisodeContext | null;
   showToast: (toast: Omit<ToastNotification, "id">) => void;
 }) {
   const approved = promos.filter((p) => p.status === "approved");
+  const [exporting, setExporting] = useState<string | null>(null);
 
-  const exportFile = (format: string) => {
+  const exportFile = async (format: string) => {
+    if (activeEpisode) {
+      setExporting(format);
+      try {
+        const ready = await api.listEvaluationReady();
+        const match = ready.find(
+          (item) =>
+            item.project_id === activeEpisode.project_id &&
+            item.episode_id === activeEpisode.episode_id,
+        );
+        if (match) {
+          const fmt = format.toLowerCase() as "json" | "csv" | "txt" | "otio";
+          const result = await api.exportPromos(match.job_id, match.episode_id, fmt);
+          const mime = fmt === "json" || fmt === "otio" ? "application/json" : "text/plain";
+          download(result.filename, result.artifact, mime);
+          showToast({
+            message: `Exported ${result.filename} (${result.candidate_count} cuts, SHA-256: ${result.sha256.slice(0, 10)}…) with verified backend checksum.`,
+            type: "success",
+          });
+          return;
+        }
+      } catch (err) {
+        showToast({
+          message: err instanceof Error ? err.message : "Backend export failed; falling back to client draft.",
+          type: "warning",
+        });
+      } finally {
+        setExporting(null);
+      }
+    }
+
     if (approved.length === 0) {
       showToast({
         message: "No approved cuts available. Approve at least one promo in Studio first.",
@@ -1638,7 +1454,7 @@ function ExportsPage({
         "promoforge-cut-sheet.json",
         JSON.stringify(
           {
-            project: "Glass Hearts",
+            project: activeEpisode?.project_name || "Glass Hearts",
             timestamp: new Date().toISOString(),
             approved_promos: approved,
           },
@@ -1677,6 +1493,8 @@ function ExportsPage({
     });
   };
 
+  const hasCuts = activeEpisode ? true : approved.length > 0;
+
   return (
     <>
       <PageHeader
@@ -1687,18 +1505,18 @@ function ExportsPage({
           <Button
             variant="primary"
             onClick={() => exportFile("JSON")}
-            disabled={approved.length === 0}
-            disabledReason={approved.length === 0 ? "Approve at least one promo cut in Studio to export." : undefined}
+            disabled={!hasCuts || !!exporting}
+            disabledReason={!hasCuts ? "Approve at least one promo cut in Studio to export." : undefined}
           >
             <Download size={16} aria-hidden="true" />
-            Export all approved ({approved.length})
+            {exporting ? `Exporting ${exporting}…` : activeEpisode ? `Export ${activeEpisode.episode_id} Cuts` : `Export all approved (${approved.length})`}
           </Button>
         }
       />
 
       <Panel
         title="Available Editorial Formats"
-        action={<Badge tone="green">{approved.length} cuts approved for delivery</Badge>}
+        action={<Badge tone="green">{activeEpisode ? `${activeEpisode.project_name} · ${activeEpisode.episode_id}` : `${approved.length} cuts approved for delivery`}</Badge>}
       >
         <div className="export-list">
           {[
@@ -1733,7 +1551,7 @@ function ExportsPage({
               <Button
                 variant="secondary"
                 onClick={() => exportFile(f.type)}
-                disabled={approved.length === 0}
+                disabled={!hasCuts || !!exporting}
               >
                 <Download size={15} aria-hidden="true" /> Download {f.type}
               </Button>
@@ -1746,19 +1564,23 @@ function ExportsPage({
       <Panel title="Editorial Timeline Interchange" className="otio-card">
         <div className="otio">
           <div>
-            <Badge tone="purple">FastAPI Adapter Contract</Badge>
+            <Badge tone="purple">Native OpenTimelineIO Delivery</Badge>
             <h2>OpenTimelineIO (OTIO) Native Delivery</h2>
             <p>
-              The PromoForge backend adapter produces standardized <code>.otio</code> timeline tracks containing accurate video cuts, audio dialogue markers, and subtitle tracks. Deliver native project files straight into Adobe Premiere Pro, DaVinci Resolve, and Final Cut.
+              The PromoForge backend generates standardized <code>.otio</code> timeline tracks containing accurate cut points, screenplay event markers, and metadata. Export directly for Adobe Premiere Pro, DaVinci Resolve, and Final Cut Pro.
             </p>
-            <code>POST /v1/exports/otio {"{ project_id: 'p1', promo_ids: ['pr1', 'pr2'] }"}</code>
+            <code>GET /jobs/{'{job_id}'}/episodes/{'{episode_key}'}/export?format=otio</code>
           </div>
           <div className="integration-state">
-            <CircleDot size={24} className="text-muted" aria-hidden="true" />
-            <b>Backend Pipeline Standby</b>
-            <span>Configure FastAPI endpoint in Settings</span>
-            <Button variant="secondary" disabled>
-              Verify endpoint handshake
+            <CheckCircle2 size={24} className="text-emerald-500" aria-hidden="true" />
+            <b>Backend Pipeline Connected</b>
+            <span>Verified SHA-256 Checksum on Export</span>
+            <Button
+              variant="primary"
+              disabled={!hasCuts || !!exporting}
+              onClick={() => exportFile("OTIO")}
+            >
+              <Download size={15} aria-hidden="true" /> Export OTIO Timeline
             </Button>
           </div>
         </div>
@@ -1778,157 +1600,6 @@ function EvaluationPage({
   showToast: (toast: Omit<ToastNotification, "id">) => void;
 }) {
   return <EvaluationWorkflow activeEpisode={activeEpisode} showToast={showToast} />;
-}
-
-function LegacyEvaluationPage({
-  showToast,
-}: {
-  showToast: (toast: Omit<ToastNotification, "id">) => void;
-}) {
-  const [tab, setTab] = useState<"metrics" | "failures" | "json">("metrics");
-
-  const evaluationReport = {
-    run_id: "eval_prometheus_24_audit",
-    timestamp: "2026-11-20T07:00:00Z",
-    model: "prometheus-narrative-v2.4",
-    benchmark_dataset: "PF-Eval-v1.3",
-    metrics: {
-      hook_precision: 0.86,
-      narrative_coherence: 0.91,
-      cliffhanger_recall: 0.83,
-      spoiler_avoidance: 0.94,
-    },
-    sample_count: 1248,
-    status: "completed",
-    audit_notes: "Model exceeds heuristic baseline across all dimensions, with +21.1% lift in hook precision.",
-  };
-
-  const handleDownload = () => {
-    download("promoforge-evaluation-audit.json", JSON.stringify(evaluationReport, null, 2), "application/json");
-    showToast({ message: "Downloaded evaluation audit report.", type: "success" });
-  };
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Editorial Analysis / Model Evaluation"
-        title="Prometheus v2.4 Editorial Quality Audit"
-        description="Audit model ranking precision, narrative coherence, and spoiler risk mitigation against the PF-Eval validation set."
-        actions={
-          <Button variant="primary" onClick={handleDownload}>
-            <Download size={16} aria-hidden="true" /> Download validation report (JSON)
-          </Button>
-        }
-      />
-
-      <div className="metrics-grid">
-        <Metric label="Overall Model Quality" value="0.89" delta="+18.2% vs baseline" />
-        <Metric label="Screenplays Evaluated" value="1,248" />
-        <Metric label="Pass Rate" value="92.6%" delta="+4.1 pts" />
-        <Metric label="Actionable Anomalies" value="03" delta="Review failure analysis" positive={false} />
-      </div>
-
-      <div className="tabs" role="tablist" aria-label="Evaluation audit views">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "metrics"}
-          className={tab === "metrics" ? "active" : ""}
-          onClick={() => setTab("metrics")}
-        >
-          Validation Metrics
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "failures"}
-          className={tab === "failures" ? "active" : ""}
-          onClick={() => setTab("failures")}
-        >
-          Failure Analysis (Action Items)
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "json"}
-          className={tab === "json" ? "active" : ""}
-          onClick={() => setTab("json")}
-        >
-          Raw Evaluation JSON
-        </button>
-      </div>
-
-      {tab === "metrics" && (
-        <Panel title="Prometheus Narrative v2.4 vs Heuristic Baseline">
-          <div className="table-scroll">
-            <table>
-              <caption className="sr-only">
-                Comparison of Prometheus model metrics against baseline
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">Editorial Metric</th>
-                  <th scope="col">Prometheus v2.4</th>
-                  <th scope="col">Heuristic Baseline</th>
-                  <th scope="col">Net Performance Lift</th>
-                </tr>
-              </thead>
-              <tbody>
-                {evaluationRows.map((row) => (
-                  <tr key={row[0]}>
-                    <th scope="row" style={{ fontWeight: 600 }}>{row[0]}</th>
-                    <td>{row[1]}</td>
-                    <td>{row[2]}</td>
-                    <td className="positive">{row[3]}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-      )}
-
-      {tab === "failures" && (
-        <div className="failure-grid">
-          {[
-            {
-              title: "Temporal Ambiguity",
-              cases: "34 cases",
-              desc: "Dialogue references a character event occurring outside the selected episode boundary.",
-              remediation: "Action: Add automated episode scene chronology filter before finalizing candidate.",
-            },
-            {
-              title: "False Cliffhangers",
-              cases: "21 cases",
-              desc: "Scene boundary appears dramatic acoustically but resolves trivially in the next line of screenplay dialogue.",
-              remediation: "Action: Expand lookahead window from 1 line to 3 lines in cliffhanger score.",
-            },
-            {
-              title: "Entity Cold Starts",
-              cases: "17 cases",
-              desc: "Selected moment assumes prior knowledge of secondary character relationships without introduction.",
-              remediation: "Action: Require minimum character introduction weight in standalone promo ranking.",
-            },
-          ].map((item) => (
-            <Panel key={item.title} className="failure-card">
-              <Badge tone="red">{item.cases}</Badge>
-              <h3>{item.title}</h3>
-              <p>{item.desc}</p>
-              <div style={{ background: "#1b1d25", padding: "10px", borderRadius: "6px", fontSize: "12px", color: "#ffb799" }}>
-                {item.remediation}
-              </div>
-            </Panel>
-          ))}
-        </div>
-      )}
-
-      {tab === "json" && (
-        <Panel title="Evaluation JSON Payload">
-          <pre>{JSON.stringify(evaluationReport, null, 2)}</pre>
-        </Panel>
-      )}
-    </>
-  );
 }
 
 // -------------------------------------------------------------
@@ -1988,7 +1659,7 @@ function SettingsPage({
       <PageHeader
         eyebrow="System / Settings"
         title="Workspace Configuration & Model Weights"
-        description="Tune the Prometheus narrative evaluation weights and editorial constraints to match your production standards."
+        description="Tune narrative evaluation weights and editorial constraints to match your production standards."
         actions={
           <Button
             variant="primary"
@@ -2012,9 +1683,9 @@ function SettingsPage({
                 value={draft.model}
                 onChange={(e) => update("model", e.target.value)}
               >
-                <option>Prometheus Narrative v2.4 (Recommended)</option>
-                <option>Prometheus Narrative v2.3</option>
-                <option>Heuristic Baseline v1.8</option>
+                <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Configured Gemini Provider)</option>
+                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                <option value="rule-based-v1">rule-based-v1 (Deterministic Offline Fallback)</option>
               </select>
             </label>
 
@@ -2240,6 +1911,35 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!activeEpisode) return;
+    let cancelled = false;
+    api
+      .listProjects()
+      .then(async (projects) => {
+        if (cancelled) return;
+        const projectMatch = projects.find((p) => p.id === activeEpisode.project_id);
+        if (!projectMatch) {
+          setActiveEpisode(null);
+          setActiveCandidateId(null);
+          return;
+        }
+        const episodes = await api.listProjectEpisodes(activeEpisode.project_id);
+        if (cancelled) return;
+        const episodeMatch = episodes.find((e) => e.episode_id === activeEpisode.episode_id);
+        if (!episodeMatch) {
+          setActiveEpisode(null);
+          setActiveCandidateId(null);
+        }
+      })
+      .catch(() => {
+        // Backend offline or unreachable: preserve local active context
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!mobileNavOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -2302,7 +2002,13 @@ export default function App() {
         showToast={showToast}
       />
     ),
-    exports: <ExportsPage promos={promos} showToast={showToast} />,
+    exports: (
+      <ExportsPage
+        promos={promos}
+        activeEpisode={activeEpisode}
+        showToast={showToast}
+      />
+    ),
     evaluation: <EvaluationPage activeEpisode={activeEpisode} showToast={showToast} />,
     settings: (
       <SettingsPage
@@ -2376,8 +2082,8 @@ export default function App() {
           {(!collapsed || mobileNavOpen) && (
             <div className="demo-card">
               <Badge tone="orange">STUDIO DEMO</Badge>
-              <p>Prometheus Narrative v2.4</p>
-              <span>Fictional microdrama datasets</span>
+              <p>Editorial Narrative Engine · Gemini</p>
+              <span>Verified Screenplay Records</span>
             </div>
           )}
           <div className="profile">

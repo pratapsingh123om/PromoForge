@@ -279,6 +279,9 @@ def analyze_project(
             project_id=project_id,
             idempotency_key=payload.idempotency_key,
         )
+        if created or job.status == "queued":
+            from app.services.orchestration import dispatch_analysis_job
+            dispatch_analysis_job(job.id)
     except RepositoryError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return AnalysisJobMutationResponse(job=serialize_job(job), created=created)

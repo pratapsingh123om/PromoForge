@@ -97,6 +97,8 @@ def retry_analysis_job(
 ) -> AnalysisJobMutationResponse:
     try:
         job = retry_job(session, get_job(session, job_id))
+        from app.services.orchestration import dispatch_analysis_job
+        dispatch_analysis_job(job.id)
     except RepositoryError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except JobStateError as exc:

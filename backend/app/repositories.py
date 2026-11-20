@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import re
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AnalysisJobRecord,
+    EpisodeCheckpointRecord,
     EpisodeRecord,
     ProjectRecord,
     SceneRecord,
@@ -101,9 +104,34 @@ def import_episode(
     )
     project.status = "ready"
     project.updated_at = episode.created_at
+
+    # Append checkpoint to latest resumable job if one exists (PF-008)
+    latest_job = session.scalar(
+        select(AnalysisJobRecord)
+        .where(
+            AnalysisJobRecord.project_id == project_id,
+            AnalysisJobRecord.resumable.is_(True),
+        )
+        .order_by(AnalysisJobRecord.created_at.desc())
+    )
+    if latest_job is not None:
+        session.add(
+            EpisodeCheckpointRecord(
+                job_id=latest_job.id,
+                episode_id=episode.id,
+                status="pending",
+                stage="pending",
+            )
+        )
+        latest_job.episodes_total += 1
+
     session.commit()
     session.refresh(episode)
     return episode, True
+
+
+def normalize_slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
 
 
 def get_or_create_project_by_name(
@@ -118,6 +146,14 @@ def get_or_create_project_by_name(
     )
     if existing is not None:
         return existing, False
+
+    slug = normalize_slug(normalized)
+    if slug:
+        all_projects = session.scalars(select(ProjectRecord)).all()
+        for proj in all_projects:
+            if normalize_slug(proj.name) == slug:
+                return proj, False
+
     project = ProjectRecord(
         name=normalized,
         status="ready",

@@ -78,12 +78,13 @@ export const api = {
     form.append("file", file);
     return backendRequest("/projects/episodes/import", { method: "POST", body: form });
   },
-  async queueProjectAnalysis(projectId: string) {
+  async queueProjectAnalysis(projectId: string, idempotencyKey?: string) {
+    const key = idempotencyKey || `analysis-${projectId}-${new Date().toISOString().slice(0, 10)}`;
     return backendRequest<{ job: { id: string; status: string }; created: boolean }>(
       `/projects/${encodeURIComponent(projectId)}/analyze`,
       {
         method: "POST",
-        body: JSON.stringify({ idempotency_key: `analysis-${Date.now()}` }),
+        body: JSON.stringify({ idempotency_key: key }),
       },
     );
   },
@@ -96,6 +97,39 @@ export const api = {
     }>(
       `/jobs/${encodeURIComponent(jobId)}/episodes/${encodeURIComponent(episodeId)}/promos`,
     );
+  },
+  async updateCandidate(
+    jobId: string,
+    episodeKey: string,
+    candidateId: string,
+    payload: { status?: string; start_ms?: number; end_ms?: number },
+  ): Promise<{ candidate: BackendPromoCandidate; updated: boolean }> {
+    return backendRequest(
+      `/jobs/${encodeURIComponent(jobId)}/episodes/${encodeURIComponent(episodeKey)}/promos/${encodeURIComponent(candidateId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+  async exportPromos(
+    jobId: string,
+    episodeKey: string,
+    format: "json" | "csv" | "txt" | "otio" = "json",
+  ): Promise<{
+    episode_id: string;
+    format: string;
+    sha256: string;
+    filename: string;
+    candidate_count: number;
+    artifact: string;
+  }> {
+    return backendRequest(
+      `/jobs/${encodeURIComponent(jobId)}/episodes/${encodeURIComponent(episodeKey)}/export?format=${encodeURIComponent(format)}`,
+    );
+  },
+  async listEvaluationSessions(): Promise<{ sessions: EvaluationSessionSummary[] }> {
+    return backendRequest("/evaluation/sessions");
   },
   async readEpisodeRecommendation(
     jobId: string,

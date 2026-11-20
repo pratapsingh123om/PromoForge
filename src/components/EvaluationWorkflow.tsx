@@ -114,6 +114,22 @@ export function EvaluationWorkflow({
           item.episode_id === activeEpisode?.episode_id,
       );
       setSelectedReady((current) => current || (preferred ? `${preferred.job_id}:${preferred.episode_id}` : items[0] ? `${items[0].job_id}:${items[0].episode_id}` : ""));
+
+      // Resume latest active session if one exists (PF-011)
+      try {
+        const { sessions } = await api.listEvaluationSessions();
+        if (sessions && sessions.length > 0) {
+          const storedSessionId = localStorage.getItem("pf-active-evaluation-session");
+          const targetSession = sessions.find((s) => s.id === storedSessionId) || sessions[0];
+          if (targetSession) {
+            localStorage.setItem("pf-active-evaluation-session", targetSession.id);
+            setSession(targetSession);
+            await loadAssignments(targetSession.id, activeReviewer);
+          }
+        }
+      } catch {
+        // Fall through if no persisted session endpoint is available yet
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load review-ready candidates.");
     } finally {
@@ -129,6 +145,7 @@ export function EvaluationWorkflow({
     const response = await api.listReviewAssignments(sessionId, reviewerId);
     setSession(response.session);
     setAssignments(response.assignments);
+    localStorage.setItem("pf-active-evaluation-session", response.session.id);
     const nextPending = response.assignments.findIndex((item) => item.status === "pending");
     setActiveIndex(nextPending >= 0 ? nextPending : 0);
   };
@@ -144,6 +161,7 @@ export function EvaluationWorkflow({
         reviewers.map((reviewer) => reviewer.trim()),
       );
       setSession(response.session);
+      localStorage.setItem("pf-active-evaluation-session", response.session.id);
       setActiveReviewer(reviewers[0].trim());
       await loadAssignments(response.session.id, reviewers[0].trim());
       showToast({

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_session
+from app.models import EvaluationSessionRecord
 from app.repositories import RepositoryError
 from app.schemas.reviews import (
     CreateEvaluationSessionRequest,
@@ -62,6 +64,22 @@ def create_session(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (PromoGenerationError, ReviewWorkflowError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get(
+    "/evaluation/sessions",
+    response_model=list[EvaluationSessionSummary],
+)
+def list_evaluation_sessions(
+    limit: int = Query(default=20, ge=1, le=50),
+    session: Session = Depends(get_session),
+) -> list[EvaluationSessionSummary]:
+    rows = session.scalars(
+        select(EvaluationSessionRecord)
+        .order_by(EvaluationSessionRecord.created_at.desc())
+        .limit(limit)
+    ).all()
+    return [read_evaluation_session(session, s.id) for s in rows]
 
 
 @router.get(

@@ -63,6 +63,9 @@ def test_m0_routes_are_registered() -> None:
     assert any(path.endswith("/tiebreaker") and method == "POST" for path, method in route_methods)
     assert any(path.endswith("/finalize") and method == "POST" for path, method in route_methods)
     assert ("/api/evaluation/ready", "GET") in route_methods
+    assert ("/api/evaluation/sessions", "GET") in route_methods
+    assert any(path.endswith("/export") and method == "GET" for path, method in route_methods)
+    assert any("/promos/" in path and method == "PATCH" for path, method in route_methods)
 
 
 def test_health_endpoint() -> None:
