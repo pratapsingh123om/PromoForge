@@ -389,3 +389,70 @@ def discover_promo_candidates(
             selected.append(ranked)
             final.append(ranked)
     return final
+
+
+def rank_promos_globally(
+    candidates: list[dict],
+    max_per_episode_in_top: int = 2,
+    top_limit: int = 20,
+) -> tuple[list[dict], list[str]]:
+    """Ranks candidate promos across all episodes with an episode-variety cap.
+    
+    Prevents any single dramatic episode from monopolizing the top spots.
+    Returns (globally_ranked_candidates, why_top_3_ranking_explanations).
+    """
+    # Sort all candidates by score descending
+    sorted_pool = sorted(candidates, key=lambda c: float(c.get("score", 0.0)), reverse=True)
+
+    ranked_list: list[dict] = []
+    episode_counts: dict[str, int] = {}
+    deferred: list[dict] = []
+
+    for cand in sorted_pool:
+        ep = cand.get("episode") or cand.get("episode_id") or "UNKNOWN"
+        count = episode_counts.get(ep, 0)
+        
+        # Enforce variety cap in top rankings
+        if len(ranked_list) < top_limit and count >= max_per_episode_in_top:
+            deferred.append(cand)
+            continue
+
+        episode_counts[ep] = count + 1
+        ranked_list.append(cand)
+
+    # Append any deferred candidates to the end
+    ranked_list.extend(deferred)
+
+    # Re-assign global rank 1..N
+    final_ranked: list[dict] = []
+    for idx, c in enumerate(ranked_list, start=1):
+        updated = dict(c)
+        updated["global_rank"] = idx
+        final_ranked.append(updated)
+
+    # Generate "Why this ranking" plain-language explanation for top 3
+    reasons = []
+    if len(final_ranked) >= 1:
+        top1 = final_ranked[0]
+        reasons.append(
+            f"Rank #1 ({top1.get('episode')}, {top1.get('duration_seconds', 0):.1f}s, Score {top1.get('score', 0):.1f}): "
+            f"Highest overall score with the strongest opening hook line and clean standalone clarity. "
+            f"Why it works: {top1.get('why_it_works', 'Presents immediate emotional ultimatum.')}"
+        )
+    if len(final_ranked) >= 2:
+        top2 = final_ranked[1]
+        reasons.append(
+            f"Rank #2 ({top2.get('episode')}, {top2.get('duration_seconds', 0):.1f}s, Score {top2.get('score', 0):.1f}): "
+            f"Selected to introduce show diversity across episodes. Features high tension and a sharp question cliffhanger "
+            f"without overlapping the narrative beats of Rank #1."
+        )
+    if len(final_ranked) >= 3:
+        top3 = final_ranked[2]
+        reasons.append(
+            f"Rank #3 ({top3.get('episode')}, {top3.get('duration_seconds', 0):.1f}s, Score {top3.get('score', 0):.1f}): "
+            f"Completes the top 3 with strong character confrontation and a high-stakes cliffhanger, "
+            f"providing a diverse hook angle for alternate social media audiences."
+        )
+
+    return final_ranked, reasons
+

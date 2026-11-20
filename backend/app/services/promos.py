@@ -272,10 +272,11 @@ def _recommendation_rationale(
         ),
     ]
     ending_ev = evidence[-1] if evidence else None
+    all_open_questions = [ev.open_question for ev in evidence if ev.open_question]
     if ending_ev and ending_ev.open_question:
         rationale.append(f"Cliffhanger leaves an unresolved curiosity gap: \"{ending_ev.open_question}\"")
-    elif open_questions:
-        rationale.append(f"Leaves an unresolved curiosity gap: \"{open_questions[-1]}\"")
+    elif all_open_questions:
+        rationale.append(f"Leaves an unresolved curiosity gap: \"{all_open_questions[-1]}\"")
     else:
         rationale.append(
             "Ends on a high-tension beat without including a model-identified resolution."
