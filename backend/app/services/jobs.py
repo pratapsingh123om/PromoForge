@@ -168,7 +168,7 @@ def start_checkpoint(
     stage: str,
 ) -> EpisodeCheckpointRecord:
     checkpoint = _get_checkpoint(session, job_id=job_id, episode_key=episode_key)
-    if checkpoint.status not in {"pending", "failed"}:
+    if checkpoint.status not in {"pending", "failed", "completed"}:
         raise JobStateError(
             f"cannot start checkpoint in status {checkpoint.status}: {episode_key}"
         )

@@ -124,7 +124,7 @@ async def analyze_episode(
     job = get_job(session, job_id)
     if job.status == "queued":
         transition_job(session, job, "running", stage="narrative_extraction")
-    elif job.status != "running":
+    elif job.status not in {"running", "completed"}:
         raise JobStateError(f"cannot analyze episode while job is {job.status}")
 
     episode = session.scalar(

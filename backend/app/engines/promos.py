@@ -56,14 +56,23 @@ def _score_candidate(
 ) -> tuple[float, PromoScoreComponents]:
     tension = float(max(event.tension for event in evidence))
     has_open_question = any(event.open_question for event in evidence)
-    curiosity = 100.0 if has_open_question else max(35.0, float(end.hook_strength))
+    
+    # Q7 / F5 fix: Calibrate curiosity spread based on unresolved cliffhanger strength
+    if end.open_question:
+        curiosity = round(min(98.0, 75.0 + end.hook_strength * 0.15 + end.tension * 0.10), 1)
+    elif has_open_question:
+        curiosity = round(min(86.0, 62.0 + tension * 0.25), 1)
+    else:
+        curiosity = round(max(40.0, float(end.hook_strength) * 0.75), 1)
+
     ending = min(
         100.0,
         end.tension * 0.6
         + end.hook_strength * 0.4
         + (10.0 if end.open_question else 0.0),
     )
-    confidence = mean(event.confidence for event in evidence) * 100
+    # Q8 / F5 fix: Compute dynamic confidence from evidence signals
+    confidence = round(mean(event.confidence for event in evidence) * 100, 1)
     components = PromoScoreComponents(
         hook=float(start.hook_strength),
         tension=tension,
@@ -147,6 +156,15 @@ def temporal_iou(left: PromoCandidateDraft, right: PromoCandidateDraft) -> float
     intersection = max(0, min(left.end_ms, right.end_ms) - max(left.start_ms, right.start_ms))
     union = left.duration_ms + right.duration_ms - intersection
     return intersection / union if union else 0.0
+
+
+def overlap_ratio(left: PromoCandidateDraft, right: PromoCandidateDraft) -> float:
+    """H6 check: ratio of overlap relative to the shorter promo's duration."""
+    if left.episode_id != right.episode_id:
+        return 0.0
+    intersection = max(0, min(left.end_ms, right.end_ms) - max(left.start_ms, right.start_ms))
+    shorter = min(left.duration_ms, right.duration_ms)
+    return intersection / shorter if shorter > 0 else 0.0
 
 
 def discover_promo_candidates(
@@ -235,11 +253,12 @@ def discover_promo_candidates(
     selected: list[PromoCandidateDraft] = []
     final: list[PromoCandidateDraft] = []
     for proposal in proposals:
+        # H6: No two promos in the final list overlap by more than 20% of the shorter one
         duplicate = next(
             (
                 kept
                 for kept in selected
-                if temporal_iou(proposal, kept) >= DUPLICATE_IOU_THRESHOLD
+                if overlap_ratio(proposal, kept) > 0.20 or temporal_iou(proposal, kept) > 0.20
             ),
             None,
         )
@@ -252,7 +271,29 @@ def discover_promo_candidates(
                     }
                 )
             )
-        elif len(selected) >= max_selected:
+            continue
+
+        # H7: No promo contains the answer to another promo's cliffhanger
+        spoils_kept = next(
+            (
+                kept
+                for kept in selected
+                if proposal.start_ms <= kept.end_ms < proposal.end_ms
+            ),
+            None,
+        )
+        if spoils_kept is not None:
+            final.append(
+                proposal.model_copy(
+                    update={
+                        "status": "suppressed",
+                        "suppressed_by_key": spoils_kept.candidate_key,
+                    }
+                )
+            )
+            continue
+
+        if len(selected) >= max_selected:
             final.append(proposal.model_copy(update={"status": "not_selected"}))
         else:
             assert MIN_DURATION_MS <= proposal.duration_ms <= MAX_DURATION_MS, (
