@@ -1,0 +1,163 @@
+{
+  "source_episodes": [
+    {
+      "episode_id": "EP_SYNTH_001",
+      "episode_number": 1,
+      "duration_ms": 120000,
+      "event_ids": ["EP_SYNTH_001_E001", "EP_SYNTH_001_E002", "EP_SYNTH_001_E003"],
+      "spoiler_event_ids": ["EP_SYNTH_001_E003"]
+    }
+  ],
+  "candidates": [
+    {
+      "candidate_id": "A001",
+      "system_id": "A",
+      "rank": 1,
+      "segments": [
+        {
+          "episode_id": "EP_SYNTH_001",
+          "start_ms": 0,
+          "end_ms": 30000,
+          "evidence_event_ids": ["EP_SYNTH_001_E001"]
+        }
+      ]
+    },
+    {
+      "candidate_id": "A002",
+      "system_id": "A",
+      "rank": 2,
+      "segments": [
+        {
+          "episode_id": "EP_SYNTH_001",
+          "start_ms": 5000,
+          "end_ms": 35000,
+          "evidence_event_ids": ["EP_SYNTH_001_E002"]
+        }
+      ]
+    },
+    {
+      "candidate_id": "A003",
+      "system_id": "A",
+      "rank": 3,
+      "segments": [
+        {
+          "episode_id": "EP_SYNTH_001",
+          "start_ms": 90000,
+          "end_ms": 120000,
+          "evidence_event_ids": ["EP_SYNTH_001_E003"]
+        }
+      ]
+    }
+  ],
+  "reviews": [
+    {
+      "candidate_id": "A001",
+      "reviewer_id": "R01",
+      "decision": "approve",
+      "scores": {
+        "hook": 5,
+        "curiosity": 5,
+        "clarity": 4,
+        "emotion": 4,
+        "coherence": 5,
+        "spoiler_safety": 5,
+        "editability": 5,
+        "brand_fit": 4
+      },
+      "boundary_usable": true,
+      "spoiler_safe": true
+    },
+    {
+      "candidate_id": "A001",
+      "reviewer_id": "R02",
+      "decision": "approve",
+      "scores": {
+        "hook": 4,
+        "curiosity": 5,
+        "clarity": 4,
+        "emotion": 4,
+        "coherence": 4,
+        "spoiler_safety": 5,
+        "editability": 5,
+        "brand_fit": 4
+      },
+      "boundary_usable": true,
+      "spoiler_safe": true
+    },
+    {
+      "candidate_id": "A002",
+      "reviewer_id": "R01",
+      "decision": "approve",
+      "scores": {
+        "hook": 4,
+        "curiosity": 4,
+        "clarity": 4,
+        "emotion": 4,
+        "coherence": 4,
+        "spoiler_safety": 5,
+        "editability": 4,
+        "brand_fit": 4
+      },
+      "boundary_usable": true,
+      "spoiler_safe": true
+    },
+    {
+      "candidate_id": "A002",
+      "reviewer_id": "R02",
+      "decision": "approve_with_changes",
+      "scores": {
+        "hook": 4,
+        "curiosity": 4,
+        "clarity": 3,
+        "emotion": 4,
+        "coherence": 3,
+        "spoiler_safety": 5,
+        "editability": 3,
+        "brand_fit": 4
+      },
+      "boundary_usable": true,
+      "spoiler_safe": true
+    },
+    {
+      "candidate_id": "A003",
+      "reviewer_id": "R01",
+      "decision": "reject",
+      "scores": {
+        "hook": 2,
+        "curiosity": 1,
+        "clarity": 4,
+        "emotion": 3,
+        "coherence": 3,
+        "spoiler_safety": 1,
+        "editability": 2,
+        "brand_fit": 2
+      },
+      "boundary_usable": false,
+      "spoiler_safe": false
+    },
+    {
+      "candidate_id": "A003",
+      "reviewer_id": "R02",
+      "decision": "reject",
+      "scores": {
+        "hook": 2,
+        "curiosity": 2,
+        "clarity": 4,
+        "emotion": 3,
+        "coherence": 3,
+        "spoiler_safety": 1,
+        "editability": 2,
+        "brand_fit": 2
+      },
+      "boundary_usable": false,
+      "spoiler_safe": false
+    }
+  ],
+  "policy": {
+    "min_duration_ms": 20000,
+    "max_duration_ms": 60000,
+    "duplicate_iou_threshold": 0.6,
+    "top_k": 3,
+    "min_reviews_per_candidate": 2
+  }
+}
