@@ -103,14 +103,40 @@ export const api = {
     episodeKey: string,
     candidateId: string,
     payload: { status?: string; start_ms?: number; end_ms?: number },
-  ): Promise<{ candidate: BackendPromoCandidate; updated: boolean }> {
-    return backendRequest(
-      `/jobs/${encodeURIComponent(jobId)}/episodes/${encodeURIComponent(episodeKey)}/promos/${encodeURIComponent(candidateId)}`,
-      {
+  ): Promise<BackendPromoCandidate> {
+    const hasJobAndEp = jobId && episodeKey && jobId !== "undefined" && episodeKey !== "undefined";
+    const primaryPath = hasJobAndEp
+      ? `/jobs/${encodeURIComponent(jobId)}/episodes/${encodeURIComponent(episodeKey)}/promos/${encodeURIComponent(candidateId)}`
+      : `/jobs/promos/${encodeURIComponent(candidateId)}`;
+
+    try {
+      return await backendRequest<BackendPromoCandidate>(primaryPath, {
         method: "PATCH",
         body: JSON.stringify(payload),
-      },
-    );
+      });
+    } catch (patchErr) {
+      // 1. Try POST on primary path in case PATCH is blocked by proxy
+      try {
+        return await backendRequest<BackendPromoCandidate>(primaryPath, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // 2. Try direct route /jobs/promos/{candidateId}
+        const directPath = `/jobs/promos/${encodeURIComponent(candidateId)}`;
+        try {
+          return await backendRequest<BackendPromoCandidate>(directPath, {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          });
+        } catch {
+          return await backendRequest<BackendPromoCandidate>(directPath, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+        }
+      }
+    }
   },
   async exportPromos(
     jobId: string,

@@ -177,6 +177,29 @@ function DiscoverPage({
   const [episodeRecommendation, setEpisodeRecommendation] = useState<PromoRecommendationResponse | null>(null);
   const [episodeCandidatesLoading, setEpisodeCandidatesLoading] = useState(false);
   const [episodeCandidatesError, setEpisodeCandidatesError] = useState("");
+  const [approvedCandidateIds, setApprovedCandidateIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("pf-approved-candidates") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const handleStatusSync = () => {
+      try {
+        setApprovedCandidateIds(JSON.parse(localStorage.getItem("pf-approved-candidates") || "[]"));
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("pf-candidate-status-changed", handleStatusSync);
+    window.addEventListener("storage", handleStatusSync);
+    return () => {
+      window.removeEventListener("pf-candidate-status-changed", handleStatusSync);
+      window.removeEventListener("storage", handleStatusSync);
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeEpisode) {
@@ -190,11 +213,12 @@ function DiscoverPage({
       setEpisodeCandidatesError("");
       try {
         const ready = await api.listEvaluationReady();
-        const match = ready.find(
-          (item) =>
-            item.project_id === activeEpisode.project_id &&
-            item.episode_id === activeEpisode.episode_id,
-        );
+        const match =
+          ready.find(
+            (item) =>
+              item.project_id === activeEpisode.project_id &&
+              item.episode_id === activeEpisode.episode_id,
+          ) || ready.find((item) => item.episode_id === activeEpisode.episode_id);
         if (!match) {
           if (!cancelled) setEpisodeRecommendation(null);
           return;
@@ -298,18 +322,39 @@ function DiscoverPage({
           <div className="real-candidate-list">
             {episodeCandidates.map((item) => {
               const candidate = item.candidate;
+              const isApproved = candidate.status === "approved" || approvedCandidateIds.includes(candidate.id);
               const expanded = expandedEvidenceId === candidate.id;
               return (
                 <article className={`real-candidate-card ${item.recommended ? "winner" : ""}`} key={candidate.id}>
                   <div className="real-candidate-row">
-                    <div className="candidate-rank"><span>{item.recommended ? "Top pick" : "Rank"}</span><b>#{String(candidate.rank || 0).padStart(2, "0")}</b></div>
-                    <div className="candidate-boundary"><div>{item.recommended && <Badge tone="green">Recommended</Badge>}<h3>{candidate.candidate_key}</h3></div><p>{(candidate.start_ms / 1000).toFixed(1)}s → {(candidate.end_ms / 1000).toFixed(1)}s · {(candidate.duration_ms / 1000).toFixed(1)} seconds</p></div>
+                    <div className="candidate-rank">
+                      <span>{isApproved ? "Approved" : item.recommended ? "Top pick" : "Rank"}</span>
+                      <b>#{String(candidate.rank || 0).padStart(2, "0")}</b>
+                    </div>
+                    <div className="candidate-boundary">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {isApproved ? (
+                          <Badge tone="green"><Check size={12} /> Approved Cut</Badge>
+                        ) : item.recommended ? (
+                          <Badge tone="green">Recommended</Badge>
+                        ) : null}
+                        <h3>{candidate.candidate_key}</h3>
+                      </div>
+                      <p>{(candidate.start_ms / 1000).toFixed(1)}s → {(candidate.end_ms / 1000).toFixed(1)}s · {(candidate.duration_ms / 1000).toFixed(1)} seconds</p>
+                    </div>
                     <div className="candidate-components"><span>Hook <b>{Math.round(candidate.score_components.hook)}</b></span><span>Tension <b>{Math.round(candidate.score_components.tension)}</b></span><span>Curiosity <b>{Math.round(candidate.score_components.curiosity)}</b></span></div>
                     <div className="candidate-evidence"><span>Evidence</span><b>{item.evidence.length} events</b></div>
                     <div className="candidate-total"><span>Decision score</span><b>{candidate.score.toFixed(1)}</b></div>
                     <div className="candidate-actions">
                       <Button variant="secondary" onClick={() => setExpandedEvidenceId(expanded ? null : candidate.id)}>{expanded ? "Hide evidence" : "Evidence & reasoning"} <ChevronDown size={14} className={expanded ? "rotate-180" : ""} /></Button>
-                      {item.recommended && <Button variant="primary" onClick={() => onUseCandidate(candidate.id)}>Use #1 <ArrowRight size={14} /></Button>}
+                      <Button variant={isApproved ? "secondary" : "primary"} onClick={() => onUseCandidate(candidate.id)}>
+                        <Clapperboard size={14} /> {isApproved ? "Studio (Approved)" : item.recommended ? "Use #1 in Studio" : "Open in Studio"}
+                      </Button>
+                      {isApproved && (
+                        <Button variant="primary" onClick={() => setPage("campaign")}>
+                          Campaign <ArrowRight size={14} />
+                        </Button>
+                      )}
                     </div>
                   </div>
                   {expanded && (
@@ -335,6 +380,22 @@ function DiscoverPage({
                 </article>
               );
             })}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-lg bg-[var(--surface-raised,#1b1d25)] border border-[var(--border-subtle,#2b2d39)] mt-6">
+              <Button variant="secondary" onClick={() => setPage("projects")}>
+                <FolderKanban size={15} /> 1. Series Library
+              </Button>
+              <div className="flex items-center gap-2">
+                {episodeRecommendation && (
+                  <Button variant="secondary" onClick={() => onUseCandidate(episodeRecommendation.top_pick_id)}>
+                    <Clapperboard size={15} /> 3. Open in Studio
+                  </Button>
+                )}
+                <Button variant="primary" onClick={() => setPage("campaign")}>
+                  Next: 4. Campaign Lab <ArrowRight size={15} />
+                </Button>
+              </div>
+            </div>
           </div>
         ) : (
           <Panel>
@@ -1112,12 +1173,14 @@ function CampaignPage({
   toggleShortlist,
   onNavigate,
   showToast,
+  activeEpisode,
 }: {
   promos: Promo[];
   shortlist: string[];
   toggleShortlist: (id: string) => void;
   onNavigate: (p: PageId) => void;
   showToast: (toast: Omit<ToastNotification, "id">) => void;
+  activeEpisode?: ActiveEpisodeContext | null;
 }) {
   const [appeal, setAppeal] = usePersistentState("pf-campaign-appeal", "Betrayal");
   const [campaignName, setCampaignName] = usePersistentState(
@@ -1391,6 +1454,20 @@ function CampaignPage({
           </Panel>
         </div>
       </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-lg bg-[var(--surface-raised,#1b1d25)] border border-[var(--border-subtle,#2b2d39)] mt-6">
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => onNavigate("discover")}>
+            <ArrowLeft size={15} /> ← 2. Back to Discover
+          </Button>
+          <Button variant="secondary" onClick={() => onNavigate("studio")}>
+            <Clapperboard size={15} /> 3. Promo Studio
+          </Button>
+        </div>
+        <Button variant="primary" onClick={() => onNavigate("exports")}>
+          Next: 5. Delivery & Exports <ArrowRight size={15} />
+        </Button>
+      </div>
     </>
   );
 }
@@ -1401,10 +1478,12 @@ function CampaignPage({
 function ExportsPage({
   promos,
   activeEpisode,
+  onNavigate,
   showToast,
 }: {
   promos: Promo[];
   activeEpisode?: ActiveEpisodeContext | null;
+  onNavigate?: (p: PageId) => void;
   showToast: (toast: Omit<ToastNotification, "id">) => void;
 }) {
   const approved = promos.filter((p) => p.status === "approved");
@@ -1415,11 +1494,12 @@ function ExportsPage({
       setExporting(format);
       try {
         const ready = await api.listEvaluationReady();
-        const match = ready.find(
-          (item) =>
-            item.project_id === activeEpisode.project_id &&
-            item.episode_id === activeEpisode.episode_id,
-        );
+        const match =
+          ready.find(
+            (item) =>
+              item.project_id === activeEpisode.project_id &&
+              item.episode_id === activeEpisode.episode_id,
+          ) || ready.find((item) => item.episode_id === activeEpisode.episode_id);
         if (match) {
           const fmt = format.toLowerCase() as "json" | "csv" | "txt" | "otio";
           const result = await api.exportPromos(match.job_id, match.episode_id, fmt);
@@ -1585,6 +1665,26 @@ function ExportsPage({
           </div>
         </div>
       </Panel>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-lg bg-[var(--surface-raised,#1b1d25)] border border-[var(--border-subtle,#2b2d39)] mt-6">
+        <div className="flex items-center gap-2">
+          {onNavigate && (
+            <>
+              <Button variant="secondary" onClick={() => onNavigate("studio")}>
+                <ArrowLeft size={15} /> ← 3. Back to Studio
+              </Button>
+              <Button variant="secondary" onClick={() => onNavigate("campaign")}>
+                4. Campaign Lab
+              </Button>
+            </>
+          )}
+        </div>
+        {onNavigate && (
+          <Button variant="secondary" onClick={() => onNavigate("projects")}>
+            <FolderKanban size={15} /> 1. Series Library
+          </Button>
+        )}
+      </div>
     </>
   );
 }
@@ -1911,24 +2011,55 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!activeEpisode) return;
     let cancelled = false;
     api
       .listProjects()
       .then(async (projects) => {
-        if (cancelled) return;
-        const projectMatch = projects.find((p) => p.id === activeEpisode.project_id);
-        if (!projectMatch) {
-          setActiveEpisode(null);
-          setActiveCandidateId(null);
-          return;
+        if (cancelled || !projects || projects.length === 0) return;
+
+        // If we already have an activeEpisode in persistent state, verify and heal IDs
+        if (activeEpisode) {
+          let projectMatch = projects.find((p) => p.id === activeEpisode.project_id);
+          if (!projectMatch) {
+            projectMatch = projects.find(
+              (p) => p.name.trim().toLowerCase() === activeEpisode.project_name.trim().toLowerCase(),
+            );
+          }
+
+          if (projectMatch) {
+            const episodes = await api.listProjectEpisodes(projectMatch.id);
+            if (cancelled) return;
+            const episodeMatch = episodes.find(
+              (e) => e.episode_id === activeEpisode.episode_id || e.id === activeEpisode.episode_id,
+            );
+            if (episodeMatch && (projectMatch.id !== activeEpisode.project_id || episodeMatch.episode_id !== activeEpisode.episode_id)) {
+              setActiveEpisode({
+                project_id: projectMatch.id,
+                project_name: projectMatch.name,
+                episode_id: episodeMatch.episode_id,
+                episode_number: episodeMatch.episode_number,
+              });
+            }
+            return;
+          }
         }
-        const episodes = await api.listProjectEpisodes(activeEpisode.project_id);
-        if (cancelled) return;
-        const episodeMatch = episodes.find((e) => e.episode_id === activeEpisode.episode_id);
-        if (!episodeMatch) {
-          setActiveEpisode(null);
-          setActiveCandidateId(null);
+
+        // If no activeEpisode is set yet, default to first available series and episode
+        if (!activeEpisode && projects.length > 0) {
+          const firstProject = projects[0];
+          try {
+            const episodes = await api.listProjectEpisodes(firstProject.id);
+            if (cancelled || !episodes.length) return;
+            const firstEp = episodes[0];
+            setActiveEpisode({
+              project_id: firstProject.id,
+              project_name: firstProject.name,
+              episode_id: firstEp.episode_id,
+              episode_number: firstEp.episode_number,
+            });
+          } catch {
+            // Keep current context
+          }
         }
       })
       .catch(() => {
@@ -2000,12 +2131,14 @@ export default function App() {
         toggleShortlist={toggleShortlist}
         onNavigate={navigate}
         showToast={showToast}
+        activeEpisode={activeEpisode}
       />
     ),
     exports: (
       <ExportsPage
         promos={promos}
         activeEpisode={activeEpisode}
+        onNavigate={navigate}
         showToast={showToast}
       />
     ),

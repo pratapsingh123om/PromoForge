@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Check,
   CheckCircle2,
   Clock3,
   FileText,
+  FolderKanban,
   Gauge,
   LoaderCircle,
   Scissors,
@@ -58,15 +60,29 @@ export function RecommendedPromoStudio({
       setError("");
       try {
         const ready = await api.listEvaluationReady();
-        const match = ready.find(
-          (item) =>
-            item.project_id === activeEpisode.project_id &&
-            item.episode_id === activeEpisode.episode_id,
-        );
+        const match =
+          ready.find(
+            (item) =>
+              item.project_id === activeEpisode.project_id &&
+              item.episode_id === activeEpisode.episode_id,
+          ) || ready.find((item) => item.episode_id === activeEpisode.episode_id);
         if (!match) throw new Error("This episode does not have a completed promo recommendation yet.");
         const response = await api.readEpisodeRecommendation(match.job_id, match.episode_id);
         if (!cancelled) {
           setJobId(match.job_id);
+          // Check local storage for any previously approved candidates
+          try {
+            const approvedList = JSON.parse(localStorage.getItem("pf-approved-candidates") || "[]") as string[];
+            if (approvedList.length > 0) {
+              response.candidates = response.candidates.map((c) =>
+                approvedList.includes(c.candidate.id) && c.candidate.status !== "approved"
+                  ? { ...c, candidate: { ...c.candidate, status: "approved" } }
+                  : c,
+              );
+            }
+          } catch {
+            // ignore
+          }
           setRecommendation(response);
         }
       } catch (caught) {
@@ -100,12 +116,34 @@ export function RecommendedPromoStudio({
   }, [selected?.candidate.id]);
 
   const handleStatusChange = async (newStatus: "approved" | "rejected" | "selected") => {
-    if (!jobId || !selected) return;
+    if (!selected) return;
     setUpdating(true);
+    const epKey = selected.candidate.episode_id || activeEpisode.episode_id;
     try {
-      await api.updateCandidate(jobId, activeEpisode.episode_id, selected.candidate.id, {
+      await api.updateCandidate(jobId, epKey, selected.candidate.id, {
         status: newStatus,
       });
+
+      // Synchronize in persistent local storage so all stages recognize this approved cut
+      try {
+        const approvedSet = new Set<string>(
+          JSON.parse(localStorage.getItem("pf-approved-candidates") || "[]")
+        );
+        if (newStatus === "approved") {
+          approvedSet.add(selected.candidate.id);
+        } else {
+          approvedSet.delete(selected.candidate.id);
+        }
+        localStorage.setItem("pf-approved-candidates", JSON.stringify([...approvedSet]));
+        window.dispatchEvent(
+          new CustomEvent("pf-candidate-status-changed", {
+            detail: { candidateId: selected.candidate.id, status: newStatus },
+          })
+        );
+      } catch {
+        // Ignore local storage error
+      }
+
       setRecommendation((prev) => {
         if (!prev) return prev;
         return {
@@ -132,14 +170,15 @@ export function RecommendedPromoStudio({
   };
 
   const handleSaveTrim = async () => {
-    if (!jobId || !selected) return;
+    if (!selected) return;
     if (trimStartMs >= trimEndMs) {
       showToast({ message: "In-point must be before out-point.", type: "warning" });
       return;
     }
     setUpdating(true);
+    const epKey = selected.candidate.episode_id || activeEpisode.episode_id;
     try {
-      await api.updateCandidate(jobId, activeEpisode.episode_id, selected.candidate.id, {
+      await api.updateCandidate(jobId, epKey, selected.candidate.id, {
         start_ms: trimStartMs,
         end_ms: trimEndMs,
       });
@@ -202,13 +241,17 @@ export function RecommendedPromoStudio({
   return (
     <>
       <PageHeader
-        eyebrow="Workflow Step 3 / Recommended Promo Plan"
+        eyebrow="Workflow Step 3 / Recommended Promo Studio"
         title={`${activeEpisode.project_name} · ${activeEpisode.episode_id} · Pick #${candidate.rank}`}
         description="The top model-assisted promo is grounded in verified screenplay beats. Modify boundaries or approve cuts directly into persistent editorial storage."
         actions={
           <div className="flex items-center gap-2 flex-wrap">
-            <Button variant="secondary" onClick={() => onNavigate("discover")}><ArrowLeft size={15} /> Compare top 3</Button>
-            <Button variant="secondary" onClick={() => onNavigate("evaluation")}><ShieldCheck size={15} /> Production review</Button>
+            <Button variant="secondary" onClick={() => onNavigate("projects")}>
+              <FolderKanban size={15} /> 1. Series
+            </Button>
+            <Button variant="secondary" onClick={() => onNavigate("discover")}>
+              <ArrowLeft size={15} /> ← 2. Discover
+            </Button>
             {isApproved ? (
               <Button
                 variant="secondary"
@@ -243,6 +286,9 @@ export function RecommendedPromoStudio({
                 <Undo2 size={15} /> Revert Rejection
               </Button>
             )}
+            <Button variant="primary" onClick={() => onNavigate("campaign")}>
+              4. Campaign Lab <ArrowRight size={15} />
+            </Button>
           </div>
         }
       />
@@ -390,15 +436,43 @@ export function RecommendedPromoStudio({
         </div>
       </Panel>
 
-      <div className="demo-processing-actions">
-        <div><FileText size={18} /><span><b>This is a screenplay cut plan, not a rendered video.</b> Video assembly and media export remain a later production step.</span></div>
-        <Button
-          variant={isApproved ? "secondary" : "primary"}
-          disabled={updating}
-          onClick={() => handleStatusChange(isApproved ? "selected" : "approved")}
-        >
-          {isApproved ? "Cut is Approved" : "Approve & Commit Cut"}
-        </Button>
+      <div className="flex flex-col gap-3 p-4 rounded-lg bg-[var(--surface-raised,#1b1d25)] border border-[var(--border-subtle,#2b2d39)] mt-6">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary,#a3a6b8)]">
+          <FileText size={16} />
+          <span><b>Screenplay Editorial Cut Plan:</b> Timestamps and beats are locked into editorial storage. Video rendering occurs in subsequent NLE conform.</span>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[var(--border-subtle,#2b2d39)]">
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => onNavigate("projects")}>
+              <FolderKanban size={15} /> 1. Series Library
+            </Button>
+            <Button variant="secondary" onClick={() => onNavigate("discover")}>
+              <ArrowLeft size={15} /> ← 2. Back to Discover
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            {isApproved ? (
+              <Button
+                variant="secondary"
+                disabled={updating}
+                onClick={() => handleStatusChange("selected")}
+              >
+                <Undo2 size={15} /> Revert to Selected
+              </Button>
+            ) : (
+              <Button
+                variant="success"
+                disabled={updating}
+                onClick={() => handleStatusChange("approved")}
+              >
+                <Check size={15} /> Approve & Commit Cut
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => onNavigate("campaign")}>
+              Next: 4. Campaign Lab <ArrowRight size={15} />
+            </Button>
+          </div>
+        </div>
       </div>
     </>
   );

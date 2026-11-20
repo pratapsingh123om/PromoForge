@@ -124,7 +124,55 @@ def read_promo_evaluation_template(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+def _handle_candidate_update(
+    candidate_id: str,
+    payload: PromoCandidateUpdateRequest,
+    session: Session,
+    job_id: str | None = None,
+    episode_key: str | None = None,
+) -> PromoCandidateResponse:
+    query = select(PromoCandidateRecord).where(
+        (PromoCandidateRecord.id == candidate_id) | (PromoCandidateRecord.candidate_key == candidate_id)
+    )
+    if job_id and job_id not in {"undefined", "null", ""}:
+        query = query.where(PromoCandidateRecord.job_id == job_id)
+    candidate = session.scalar(query)
+    if candidate is None:
+        candidate = session.scalar(
+            select(PromoCandidateRecord).where(
+                (PromoCandidateRecord.id == candidate_id) | (PromoCandidateRecord.candidate_key == candidate_id)
+            )
+        )
+    if candidate is None:
+        raise HTTPException(status_code=404, detail=f"candidate not found: {candidate_id}")
+
+    episode = candidate.episode or session.get(EpisodeRecord, candidate.episode_id)
+    resolved_episode_key = episode.episode_key if episode else (episode_key or "EP_UNKNOWN")
+
+    if payload.status is not None:
+        candidate.status = payload.status
+    if payload.start_ms is not None:
+        if payload.start_ms < 0 or payload.start_ms >= candidate.end_ms:
+            raise HTTPException(status_code=422, detail="invalid start_ms")
+        candidate.start_ms = payload.start_ms
+        candidate.duration_ms = candidate.end_ms - candidate.start_ms
+    if payload.end_ms is not None:
+        max_duration = episode.duration_ms if episode and episode.duration_ms else candidate.end_ms + 60000
+        if payload.end_ms <= candidate.start_ms or payload.end_ms > max_duration:
+            raise HTTPException(status_code=422, detail="invalid end_ms")
+        candidate.end_ms = payload.end_ms
+        candidate.duration_ms = candidate.end_ms - candidate.start_ms
+
+    session.commit()
+    session.refresh(candidate)
+    return _serialize_candidate(candidate, episode_key=resolved_episode_key)
+
+
 @router.patch(
+    "/{job_id}/episodes/{episode_key}/promos/{candidate_id}",
+    response_model=PromoCandidateResponse,
+)
+@router.post(
     "/{job_id}/episodes/{episode_key}/promos/{candidate_id}",
     response_model=PromoCandidateResponse,
 )
@@ -135,37 +183,33 @@ def update_candidate(
     payload: PromoCandidateUpdateRequest,
     session: Session = Depends(get_session),
 ) -> PromoCandidateResponse:
-    episode = session.scalar(
-        select(EpisodeRecord).where(EpisodeRecord.episode_key == episode_key)
+    return _handle_candidate_update(
+        candidate_id=candidate_id,
+        payload=payload,
+        session=session,
+        job_id=job_id,
+        episode_key=episode_key,
     )
-    if episode is None:
-        raise HTTPException(status_code=404, detail=f"episode not found: {episode_key}")
 
-    candidate = session.scalar(
-        select(PromoCandidateRecord).where(
-            PromoCandidateRecord.job_id == job_id,
-            (PromoCandidateRecord.id == candidate_id) | (PromoCandidateRecord.candidate_key == candidate_id),
-        )
+
+@router.patch(
+    "/promos/{candidate_id}",
+    response_model=PromoCandidateResponse,
+)
+@router.post(
+    "/promos/{candidate_id}",
+    response_model=PromoCandidateResponse,
+)
+def update_candidate_direct(
+    candidate_id: str,
+    payload: PromoCandidateUpdateRequest,
+    session: Session = Depends(get_session),
+) -> PromoCandidateResponse:
+    return _handle_candidate_update(
+        candidate_id=candidate_id,
+        payload=payload,
+        session=session,
     )
-    if candidate is None:
-        raise HTTPException(status_code=404, detail=f"candidate not found: {candidate_id}")
-
-    if payload.status is not None:
-        candidate.status = payload.status
-    if payload.start_ms is not None:
-        if payload.start_ms < 0 or payload.start_ms >= candidate.end_ms:
-            raise HTTPException(status_code=422, detail="invalid start_ms")
-        candidate.start_ms = payload.start_ms
-        candidate.duration_ms = candidate.end_ms - candidate.start_ms
-    if payload.end_ms is not None:
-        if payload.end_ms <= candidate.start_ms or payload.end_ms > episode.duration_ms:
-            raise HTTPException(status_code=422, detail="invalid end_ms")
-        candidate.end_ms = payload.end_ms
-        candidate.duration_ms = candidate.end_ms - candidate.start_ms
-
-    session.commit()
-    session.refresh(candidate)
-    return _serialize_candidate(candidate, episode_key=episode_key)
 
 
 @router.get(
@@ -179,7 +223,9 @@ def export_promos(
     session: Session = Depends(get_session),
 ) -> PromoExportResponse:
     episode = session.scalar(
-        select(EpisodeRecord).where(EpisodeRecord.episode_key == episode_key)
+        select(EpisodeRecord).where(
+            (EpisodeRecord.episode_key == episode_key) | (EpisodeRecord.id == episode_key)
+        )
     )
     if episode is None:
         raise HTTPException(status_code=404, detail=f"episode not found: {episode_key}")
