@@ -769,7 +769,10 @@ export function View3RankedPromos({
             </button>
             <button
               type="button"
-              onClick={() => setFullBrowserPromoId(promo.id)}
+              onClick={() => {
+                setFullBrowserPromoId(promo.id);
+                setFullBrowserCharFilter("all");
+              }}
               title="Expand promo to full browser"
               className="p-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs border border-neutral-700 transition-colors cursor-pointer"
             >
@@ -995,7 +998,10 @@ export function View3RankedPromos({
               </button>
               <button
                 type="button"
-                onClick={() => setFullBrowserPromoId(promo.id)}
+                onClick={() => {
+                  setFullBrowserPromoId(promo.id);
+                  setFullBrowserCharFilter("all");
+                }}
                 className="flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-[10px] font-semibold text-neutral-300 hover:border-amber-500/40 hover:text-white cursor-pointer transition-colors"
               >
                 <Maximize2 size={11} />
@@ -1733,10 +1739,10 @@ export function View3RankedPromos({
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => setFullBrowserCharFilter("ALL")}
+                      onClick={() => setFullBrowserCharFilter("all")}
                       className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer transition-all ${
-                        fullBrowserCharFilter === "ALL"
-                          ? "bg-amber-500 text-neutral-950 font-bold"
+                        (!fullBrowserCharFilter || fullBrowserCharFilter.toLowerCase() === "all")
+                          ? "bg-amber-500 text-neutral-950 font-bold shadow-sm"
                           : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
                       }`}
                     >
@@ -1745,15 +1751,15 @@ export function View3RankedPromos({
                     {chars.map((charName) => {
                       const count = charCounts.get(charName) || 0;
                       const charData = characterMap.get(charName.toUpperCase());
-                      const isSelected = fullBrowserCharFilter === charName;
+                      const isSelected = fullBrowserCharFilter.toLowerCase() === charName.toLowerCase();
                       return (
                         <button
                           key={charName}
                           type="button"
-                          onClick={() => setFullBrowserCharFilter(charName)}
+                          onClick={() => setFullBrowserCharFilter(isSelected ? "all" : charName)}
                           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-all ${
                             isSelected
-                              ? "bg-purple-600 text-white font-bold"
+                              ? "bg-purple-600 text-white font-bold shadow-sm"
                               : "bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 border border-neutral-700/60"
                           }`}
                         >
@@ -1780,12 +1786,25 @@ export function View3RankedPromos({
 
           {/* Transcript Scroll Area */}
           <div className="flex-1 overflow-y-auto px-6 py-6 max-w-5xl mx-auto w-full space-y-3">
-            {fullBrowserPromo.transcript_lines
-              .filter((line) => {
-                if (fullBrowserCharFilter === "ALL") return true;
+            {(() => {
+              const filtered = fullBrowserPromo.transcript_lines.filter((line) => {
+                if (!fullBrowserCharFilter || fullBrowserCharFilter.toLowerCase() === "all") return true;
                 return line.speaker?.trim().toLowerCase() === fullBrowserCharFilter.toLowerCase();
-              })
-              .map((line, idx) => renderTranscriptLine(line, idx, true))}
+              });
+              if (filtered.length === 0) {
+                return (
+                  <div className="p-12 text-center text-neutral-500 bg-neutral-900/50 border border-neutral-800 rounded-xl space-y-2">
+                    <p className="text-sm font-semibold text-neutral-300">
+                      No dialogue lines found for "{fullBrowserCharFilter}"
+                    </p>
+                    <p className="text-xs text-neutral-500">
+                      Click "All Beats" above to view all dialogue and action beats inside this cut.
+                    </p>
+                  </div>
+                );
+              }
+              return filtered.map((line, idx) => renderTranscriptLine(line, idx, true));
+            })()}
           </div>
 
           {/* Footer Bar */}
