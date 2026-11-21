@@ -96,6 +96,7 @@ export interface PromoCandidateItem {
   rejection_reason?: string;
   moment_type?: MomentType;
   acquisition_score?: number;
+  ranking_adjustment?: number;
   post_priority?: string;
   is_top_10?: boolean;
   transcript_lines: {
@@ -142,6 +143,43 @@ export function parseClockToMs(timecode: string): number {
   if (seconds >= 60) throw new Error(`Invalid timestamp seconds: ${timecode}`);
   const fraction = (match[3] || "").padEnd(3, "0");
   return minutes * 60_000 + seconds * 1000 + Number(fraction || 0);
+}
+
+export function boundarySlicesDialogue(events: ParsedEvent[], boundaryMs: number): boolean {
+  return events.some(
+    (event) =>
+      event.type === "dialogue" &&
+      event.start_ms < boundaryMs &&
+      boundaryMs < event.end_ms,
+  );
+}
+
+function promoOverlapRatio(left: PromoCandidateItem, right: PromoCandidateItem): number {
+  const leftSegment = left.segments[0];
+  const rightSegment = right.segments[0];
+  const overlap = Math.max(
+    0,
+    Math.min(leftSegment.end_ms, rightSegment.end_ms) -
+      Math.max(leftSegment.start_ms, rightSegment.start_ms),
+  );
+  const shorter = Math.min(
+    leftSegment.end_ms - leftSegment.start_ms,
+    rightSegment.end_ms - rightSegment.start_ms,
+  );
+  return shorter > 0 ? overlap / shorter : 0;
+}
+
+export function promosConflict(left: PromoCandidateItem, right: PromoCandidateItem): boolean {
+  if (left.episode !== right.episode) return false;
+  if (promoOverlapRatio(left, right) > 0.2) return true;
+  const leftSegment = left.segments[0];
+  const rightSegment = right.segments[0];
+  const leftToRightGap = rightSegment.start_ms - leftSegment.end_ms;
+  const rightToLeftGap = leftSegment.start_ms - rightSegment.end_ms;
+  return (
+    (leftToRightGap >= 0 && leftToRightGap <= 3500) ||
+    (rightToLeftGap >= 0 && rightToLeftGap <= 3500)
+  );
 }
 
 export function parseScreenplayText(
@@ -500,15 +538,31 @@ function scoreWindow(
     qualityFlags.push("possible fake cliffhanger");
   }
   if (standalone < 70) qualityFlags.push("needs context");
-  const whyItWorks = `${startEv.speaker || "The scene"} opens on “${startEv.text.slice(0, 72)}${startEv.text.length > 72 ? "…" : ""}” and the cut ends ${
-    hasQuestion
-      ? "on an unanswered question"
-      : hasInterruption
-        ? "on an interrupted thought"
-        : hasExclamation
-          ? "on an emphatic beat"
-          : "before the next response"
-  }.`;
+  const interiorEvents = inCutEvents.filter(
+    (event) => event.event_id !== startEv.event_id && event.event_id !== endEv.event_id,
+  );
+  const escalationEv = [...interiorEvents]
+    .sort((left, right) => {
+      const strength = (event: ParsedEvent) =>
+        highStakesWords.filter((word) => event.text.toLowerCase().includes(word)).length * 3 +
+        (/[?!]/.test(event.text) ? 2 : 0) +
+        (event.type === "dialogue" ? 1 : 0);
+      return strength(right) - strength(left);
+    })[0] || interiorEvents[Math.floor(interiorEvents.length / 2)] || startEv;
+  const quote = (text: string, limit = 58) => `“${text.slice(0, limit)}${text.length > limit ? "…" : ""}”`;
+  const endingReason = hasQuestion
+    ? "on a question the clip deliberately leaves unanswered"
+    : hasInterruption
+      ? "on an interrupted thought before its meaning is resolved"
+      : hasExclamation
+        ? "on an emphatic beat before the consequence is shown"
+        : "before the next response can resolve the confrontation";
+  const contextReason = standalone >= 80
+    ? "The central conflict and speakers are established inside the window, so it remains understandable without earlier episode context."
+    : standalone >= 70
+      ? "Most of the conflict is understandable in the window, although a cold viewer may need a moment to place the relationships."
+      : "The emotional turn is strong, but pronouns or multiple speakers create context risk that an editor should review before publishing.";
+  const whyItWorks = `The opening gives ${startEv.speaker || "the scene"} an immediate conflict through ${quote(startEv.text)}, making the stakes legible in the first beat. The story then escalates on ${escalationEv.speaker || "a visual beat"}'s ${quote(escalationEv.text)}, so the cut has a narrative turn rather than disconnected drama. It exits ${endingReason}, preserving curiosity. ${contextReason}`;
 
   return {
     scores: { hook, cliffhanger, standalone, decision },
@@ -541,6 +595,12 @@ export function adjustPromoCandidate(
 
   if (!startEv) errors.push("In-point is not a dialogue or action line boundary.");
   if (!endEv) errors.push("Out-point is not a dialogue or action line boundary.");
+  if (boundarySlicesDialogue(episode.events, startMs)) {
+    errors.push("In-point cuts through an overlapping dialogue line.");
+  }
+  if (boundarySlicesDialogue(episode.events, endMs)) {
+    errors.push("Out-point cuts through an overlapping dialogue line.");
+  }
   if (durationMs < 20_000 || durationMs > 60_000) errors.push("Duration must remain between 20 and 60 seconds.");
   if (endMs <= startMs) errors.push("Out-point must be after the in-point.");
   if (startEv && episode.language === "en" && isSentenceFragment(startEv.text)) {
@@ -675,6 +735,14 @@ export function generateEpisodePromosClient(
         break;
       }
 
+      if (
+        boundarySlicesDialogue(ep.events, startEv.start_ms) ||
+        boundarySlicesDialogue(ep.events, endEv.end_ms)
+      ) {
+        summary.rejected_dialogue_slice++;
+        continue;
+      }
+
       // Slice check: dialogue cut must encompass complete lines
       const inCutEvents = ep.events.filter((e) => e.start_ms >= startEv.start_ms && e.end_ms <= endEv.end_ms);
 
@@ -757,8 +825,9 @@ export function generateEpisodePromosClient(
         summary.suppressed_overlap++;
         break;
       }
-      // H7: Starts within continuation window of kept
-      if (Math.abs(cSeg.start_ms - kSeg.end_ms) <= 3500) {
+      // H7: symmetric continuation check. Candidate order changes after model scoring,
+      // so both question→answer and answer←question directions must be suppressed.
+      if (promosConflict(cand, kept)) {
         overlaps = true;
         summary.suppressed_cliffhanger_continuation++;
         break;
@@ -810,13 +879,13 @@ export function rankAllEpisodesGlobally(
     let acquisitionBonus = 0;
     const flags = [...p.quality_flags];
 
-    if (epNum <= 15) {
+    if (mode === "series" && epNum <= 15) {
       // Early episodes: optimal for cold-audience viewer acquisition
       acquisitionBonus += 5;
-    } else if (epNum <= 30) {
+    } else if (mode === "series" && epNum <= 30) {
       // Mid episodes: good context-to-drama balance
       acquisitionBonus += 2;
-    } else if (epNum >= 40) {
+    } else if (mode === "series" && epNum >= 40) {
       // Late episodes: high risk of spoiling series reveals or requiring prior narrative context
       acquisitionBonus -= 6;
       if (!flags.includes("late-series spoiler risk")) {
@@ -831,6 +900,7 @@ export function rankAllEpisodesGlobally(
     return {
       ...p,
       acquisition_score: acquisitionScore,
+      ranking_adjustment: acquisitionBonus,
       quality_flags: flags,
     };
   });
@@ -878,6 +948,11 @@ export function rankAllEpisodesGlobally(
       continue;
     }
 
+
+    if (ranked.some((existing) => promosConflict(p, existing))) {
+      continue;
+    }
+
     // In series mode Top 10: enforce theme variety (no more than 2 of same moment type in top 5)
     if (mode === "series" && ranked.length < 5 && p.moment_type) {
       const momentCount = momentCountsInTop10[p.moment_type] || 0;
@@ -897,7 +972,7 @@ export function rankAllEpisodesGlobally(
     for (const promo of deferred) {
       if (ranked.length >= topLimit) break;
       const count = epCounts[promo.episode] || 0;
-      if (count < varietyCap + 1) {
+      if (count < varietyCap && !ranked.some((existing) => promosConflict(promo, existing))) {
         epCounts[promo.episode] = count + 1;
         ranked.push(promo);
       }
@@ -933,17 +1008,15 @@ export function rankAllEpisodesGlobally(
 
   for (let i = 0; i < Math.min(10, ranked.length); i++) {
     const promo = ranked[i];
-    const momentLabel = promo.moment_type ? promo.moment_type.replace(/_/g, " ") : "dramatic confrontation";
-    let rationale = "";
-    if (i === 0) {
-      rationale = `Rank #1 (${promo.episode}, ${promo.duration_seconds}s, Score ${promo.scores.decision}): Post 1st as campaign hero. High-stakes opening with immediate conflict (“${promo.hook_line.slice(0, 50)}…”), clean cold-audience standalone clarity (${promo.scores.standalone}/100), and zero prior episode context required.`;
-    } else if (i === 1) {
-      rationale = `Rank #2 (${promo.episode}, ${promo.duration_seconds}s, Score ${promo.scores.decision}): Post 2nd to A/B test a contrasting narrative angle (${momentLabel}). Balances high tension (${promo.scores.cliffhanger}/100 cliffhanger) while introducing character variety across the show.`;
-    } else if (i === 2) {
-      rationale = `Rank #3 (${promo.episode}, ${promo.duration_seconds}s, Score ${promo.scores.decision}): Post 3rd for retargeting; ends on a high-retention unanswered cliffhanger (“${promo.cliffhanger_line.slice(0, 50)}…”) with self-contained pacing.`;
-    } else {
-      rationale = `Rank #${i + 1} (${promo.episode}, ${promo.duration_seconds}s, Score ${promo.scores.decision}): ${promo.post_priority} featuring ${momentLabel}. ${promo.quality_flags.length ? `Flags: ${promo.quality_flags.join(", ")}.` : "Clean standalone clip."}`;
-    }
+    const rankingScore = promo.acquisition_score ?? promo.scores.decision;
+    const adjustment = promo.ranking_adjustment ?? 0;
+    const adjustmentText = adjustment === 0
+      ? "no series adjustment"
+      : `series adjustment ${adjustment > 0 ? "+" : ""}${adjustment}`;
+    const flagText = promo.quality_flags.length
+      ? ` Flags: ${promo.quality_flags.join(", ")}.`
+      : "";
+    const rationale = `Rank #${i + 1} (${promo.episode}, ${promo.duration_seconds}s): ranking score ${rankingScore} (raw ${promo.scores.decision}; ${adjustmentText}). ${promo.why_it_works}${flagText}`;
 
     if (i < 3) whyTop3.push(rationale);
     whyTop10.push(rationale);

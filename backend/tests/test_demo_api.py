@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine
+from types import SimpleNamespace
 from typing import Any, TypeVar
 
 import pytest
 from fastapi import HTTPException
 
-from app.config import Settings
 from app.llm.base import ProviderError, RetriableProviderError, StructuredGeneration
 from app.api.demo import create_scoring_prompt, run_demo_scoring
 from app.schemas.demo import (
@@ -116,7 +116,10 @@ def test_no_api_scoring_rejects_mismatched_candidate_ids() -> None:
 def test_gemini_without_request_or_backend_key_is_actionable(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.api.demo.get_settings",
-        lambda: Settings(llm_provider="gemini", gemini_api_key=""),
+        # Do not instantiate BaseSettings here: a developer's backend/.env may
+        # legitimately contain a Gemini key and must not turn this unit test
+        # into a live provider request.
+        lambda: SimpleNamespace(gemini_api_key=""),
     )
     request = DemoScoreRequest(
         show_title="Synthetic",

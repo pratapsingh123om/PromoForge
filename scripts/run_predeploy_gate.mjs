@@ -5,6 +5,8 @@ import path from "node:path";
 import {
   generateEpisodePromosClient,
   isSentenceFragment,
+  boundarySlicesDialogue,
+  promosConflict,
   parseScreenplayText,
   rankAllEpisodesGlobally,
 } from "../node_modules/.cache/promoforge-predeploy/services/screenplayEngine.js";
@@ -14,7 +16,11 @@ import {
   MAX_MODEL_CANDIDATES,
   shortlistCandidatesForModel,
 } from "../node_modules/.cache/promoforge-predeploy/services/demoRun.js";
-import { decodeUtf8Buffer } from "../node_modules/.cache/promoforge-predeploy/services/uploadValidation.js";
+import {
+  decodeUtf8Buffer,
+  extractZipScreenplays,
+  folderNameFromRelativePath,
+} from "../node_modules/.cache/promoforge-predeploy/services/uploadValidation.js";
 
 const fixtureRoot = path.resolve("tests/fixtures");
 const emptySummary = () => ({
@@ -59,6 +65,16 @@ check("2.1/2.2 valid files and numeric ordering", () => {
 check("2.4 special filename", () => {
   const name = "episode [013] – café reunion.txt";
   assert.equal(parseScreenplayText(read(name), name).episode_id, "EP_013");
+});
+check("show title derives from folder path without a default", () => {
+  assert.equal(folderNameFromRelativePath("My New Series/episode-001.txt"), "My New Series");
+  assert.equal(folderNameFromRelativePath("episode-001.txt"), "");
+});
+check("ZIP series upload extracts UTF-8 screenplay files", () => {
+  const entries = extractZipScreenplays(fs.readFileSync(path.join(fixtureRoot, "invented_series.zip")));
+  assert.deepEqual(entries.map((entry) => entry.name), ["episode-001.txt", "episode-002.txt"]);
+  const parsed = entries.map((entry) => parseScreenplayText(decodeUtf8Buffer(entry.bytes), entry.name));
+  assert.deepEqual(parsed.map((episode) => episode.episode_number), [1, 2]);
 });
 check("2.5 empty", () => expectParseFailure("empty.txt", /Missing required header/));
 check("2.6 wrong formats", () => {
@@ -107,6 +123,19 @@ check("2.20 overlapping blocks/O.S./SOUND FX", () => {
   assert.ok(episode.events.some((event) => event.speaker === "Maya Rivera"));
   assert.equal(episode.unresolved_aliases.length, 0);
 });
+check("H3 overlapping dialogue boundary is rejected", () => {
+  const episode = parseScreenplayText(read("overlapping_dialogue_boundary.txt"), "overlapping_dialogue_boundary.txt");
+  const localSummary = emptySummary();
+  const promos = generateEpisodePromosClient(episode, 20, 60, localSummary, 5);
+  assert.equal(boundarySlicesDialogue(episode.events, 25_100), true);
+  assert.ok(localSummary.rejected_dialogue_slice > 0);
+  assert.ok(promos.every((promo) => promo.segments[0].start_ms !== 25_100));
+  for (const promo of promos) {
+    assert.equal(boundarySlicesDialogue(episode.events, promo.segments[0].start_ms), false);
+    assert.equal(boundarySlicesDialogue(episode.events, promo.segments[0].end_ms), false);
+  }
+  return `${localSummary.rejected_dialogue_slice} sliced candidates rejected`;
+});
 check("large episode", () => {
   const episode = parseScreenplayText(read("large_episode.txt"), "large_episode.txt");
   assert.ok(episode.duration_ms >= 20 * 60 * 1000);
@@ -154,6 +183,8 @@ check("H1-H9 explicit assertion suite and no mid-reply start", () => {
     assert.ok(episode.events.some((event) => event.start_ms === seg.start_ms), "H2 start timestamp missing");
     assert.ok(episode.events.some((event) => event.end_ms === seg.end_ms), "H2 end timestamp missing");
     assert.ok(seg.start_ms < seg.end_ms, "H3 slice error");
+    assert.equal(boundarySlicesDialogue(episode.events, seg.start_ms), false, "H3 start slices dialogue");
+    assert.equal(boundarySlicesDialogue(episode.events, seg.end_ms), false, "H3 end slices dialogue");
     assert.ok(!isSentenceFragment(promo.hook_line), "H4 fragment start");
     assert.ok(seg.end_ms <= episode.duration_ms, "H5 beyond episode duration");
     assert.ok(promo.candidate_key && promo.hook_line && promo.cliffhanger_line && promo.why_it_works && promo.global_rank, "H8 missing fields");
@@ -181,6 +212,64 @@ check("H1-H9 explicit assertion suite and no mid-reply start", () => {
     }
   }
   return "All promos pass H1-H9 and mid-reply constraints";
+});
+
+check("H7 symmetric question-answer continuation suppression", () => {
+  assert.ok(ranked.length >= 1);
+  const question = {
+    ...ranked[0],
+    id: "QUESTION",
+    candidate_key: "QUESTION",
+    episode: "EP_900",
+    quality_flags: ["soft hook"],
+    segments: [{ ...ranked[0].segments[0], episode: "EP_900", start_ms: 10_000, end_ms: 40_000 }],
+    scores: { ...ranked[0].scores, decision: 80 },
+  };
+  const answer = {
+    ...ranked[0],
+    id: "ANSWER",
+    candidate_key: "ANSWER",
+    episode: "EP_900",
+    quality_flags: [],
+    segments: [{ ...ranked[0].segments[0], episode: "EP_900", start_ms: 40_000, end_ms: 70_000 }],
+    scores: { ...ranked[0].scores, decision: 90 },
+  };
+  assert.equal(promosConflict(question, answer), true);
+  const result = rankAllEpisodesGlobally([question, answer], {
+    mode: "series",
+    varietyCap: 2,
+    qualityThreshold: 0,
+    topLimit: 25,
+  });
+  assert.deepEqual(result.ranked.map((promo) => promo.id), ["ANSWER"]);
+});
+
+check("ranking score exposes series adjustment and drives order", () => {
+  assert.ok(ranked.length >= 1);
+  const early = {
+    ...ranked[0],
+    id: "EARLY",
+    candidate_key: "EARLY",
+    episode: "EP_001",
+    segments: [{ ...ranked[0].segments[0], episode: "EP_001" }],
+    scores: { ...ranked[0].scores, decision: 85.5 },
+  };
+  const late = {
+    ...ranked[0],
+    id: "LATE",
+    candidate_key: "LATE",
+    episode: "EP_045",
+    segments: [{ ...ranked[0].segments[0], episode: "EP_045" }],
+    scores: { ...ranked[0].scores, decision: 88.8 },
+  };
+  const result = rankAllEpisodesGlobally([late, early], { mode: "series", qualityThreshold: 0, topLimit: 25 });
+  assert.deepEqual(result.ranked.map((promo) => promo.id), ["EARLY", "LATE"]);
+  assert.equal(result.ranked[0].ranking_adjustment, 5);
+  assert.equal(result.ranked[0].acquisition_score, 90.5);
+  assert.equal(result.ranked[1].ranking_adjustment, -6);
+  assert.equal(result.ranked[1].acquisition_score, 82.8);
+  assert.ok(result.whyTop10.every((reason) => reason.includes("raw") && reason.includes("series adjustment")));
+  assert.ok(result.whyTop10.every((reason) => reason.includes(ranked[0].why_it_works)));
 });
 
 check("4.11 reasons are clip-specific", () => {

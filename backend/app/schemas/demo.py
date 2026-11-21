@@ -87,7 +87,7 @@ class DemoScoringPayload(BaseModel):
 class DemoScorePromptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    show_title: str = Field(default="Untitled show", max_length=300)
+    show_title: str = Field(default="", max_length=300)
     language: str = Field(default="en", min_length=1, max_length=50)
     target_audience: str | None = Field(default=None, max_length=300)
     candidates: list[DemoScoreCandidateInput] = Field(min_length=1, max_length=30)

@@ -12,17 +12,10 @@ export const DEMO_MODEL_OPTIONS = [
   },
   {
     value: "gemini",
-    label: "Google Gemini (schema-validated)",
+    label: "Google Gemini (server-managed key)",
     defaultModel: "gemini-3.1-flash-lite",
     runnable: true,
     needsApiKey: false,
-  },
-  {
-    value: "openai",
-    label: "OpenAI-compatible endpoint",
-    defaultModel: "gpt-4o-mini",
-    runnable: true,
-    needsApiKey: true,
   },
   {
     value: "no-api",

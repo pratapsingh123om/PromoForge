@@ -67,7 +67,7 @@ The four-view frontend supports four scorer modes from `src/config.ts`:
 
 Provider failures are shown as partial runs. PromoForge never silently substitutes rule scores after a model provider was selected.
 
-API keys belong in `backend/.env`, never in committed files. The browser key field remains in React memory only, is sent to the configured local backend for that request, and is not written to local storage, exports, or logs.
+API keys belong in `backend/.env` or the deployment provider's encrypted environment settings, never in committed files. The frontend contains no API-key input and never sends provider credentials. Reviewers can demonstrate model swapping through server-approved Gemini model names, rule-only scoring, or the no-API prompt/JSON workflow.
 
 ### One-project Vercel deployment
 
@@ -96,12 +96,14 @@ For local development, the backend port is controlled by `PROMOFORGE_PORT`; the 
 
 The verified frontend path is:
 
-1. Load one or more timestamped `.txt` screenplays, or the invented sample.
+1. Load timestamped `.txt` screenplays, a folder, a `.zip` containing a series, or the invented sample. ZIP files are unpacked and validated entirely in the browser.
 2. Inspect the parse summary and explicit per-file errors.
 3. Choose Gemini, OpenAI-compatible, no-API JSON paste, or offline rule-only scoring.
-4. Review exactly three globally ranked promos with one evidence-grounded hook, cliffhanger, and reason each; rank #1 is the recommended choice for downstream production.
+4. In episode mode, review the top three candidates. In series mode, review every candidate above the quality threshold (normally 15–25 for a 50-episode series), with the top ten highlighted and rank #1 recommended for downstream production.
 5. Optionally accept, reject, or adjust a cut on real line boundaries.
 6. Download individual artifacts or a stored-run ZIP containing CSV, JSON, Markdown, EDL, `run_log.json`, timeline notes, and the exact raw model response when a model was called.
+
+The **Library** opens with a completed, invented two-episode example so a public reviewer can inspect the product without uploading private material. Completed runs added during the browser session also appear there, and moving between Library, Upload, Run status, Promos, and Quality preserves each page's in-progress UI state. This demo library is session-only; it is not a shared database and must not be treated as durable storage.
 
 Verified on 2026-11-21: the current client parser handled all 50 ignored local screenplay files with no silent skips, the invented sample completed live in Gemini and no-API modes, and the generated ZIP passed an independent archive integrity check. Run `pnpm audit:frontend-parser` to repeat the structural audit without printing screenplay text.
 

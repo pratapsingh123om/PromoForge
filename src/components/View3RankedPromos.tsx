@@ -20,6 +20,9 @@ import {
   Flame,
   HelpCircle,
   Film,
+  Maximize2,
+  Minimize2,
+  Users,
 } from "lucide-react";
 import {
   adjustPromoCandidate,
@@ -70,6 +73,7 @@ export function View3RankedPromos({
   const [filterFlag, setFilterFlag] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"rank" | "duration" | "score">("rank");
   const [expandedTranscripts, setExpandedTranscripts] = useState<Record<string, boolean>>({});
+  const [largeTranscriptId, setLargeTranscriptId] = useState<string | null>(null);
 
   // Reject modal state
   const [rejectingPromoId, setRejectingPromoId] = useState<string | null>(null);
@@ -100,7 +104,11 @@ export function View3RankedPromos({
     const list =
       allCandidatesByEpisode[activeDrilldownEpisode] ||
       promos.filter((p) => p.episode === activeDrilldownEpisode);
-    return [...list].sort((a, b) => b.scores.decision - a.scores.decision);
+    return [...list].sort(
+      (a, b) =>
+        (b.acquisition_score ?? b.scores.decision) -
+        (a.acquisition_score ?? a.scores.decision),
+    );
   }, [allCandidatesByEpisode, activeDrilldownEpisode, promos]);
 
   const episodesList = useMemo(() => {
@@ -121,7 +129,12 @@ export function View3RankedPromos({
       .sort((a, b) => {
         if (sortBy === "rank") return a.global_rank - b.global_rank;
         if (sortBy === "duration") return a.duration_seconds - b.duration_seconds;
-        if (sortBy === "score") return b.scores.decision - a.scores.decision;
+        if (sortBy === "score") {
+          return (
+            (b.acquisition_score ?? b.scores.decision) -
+            (a.acquisition_score ?? a.scores.decision)
+          );
+        }
         return 0;
       });
   }, [promos, filterEpisode, filterStatus, filterFlag, sortBy]);
@@ -130,6 +143,18 @@ export function View3RankedPromos({
     () => promos.filter((p) => p.status === "approved").length,
     [promos]
   );
+  const castPreview = useMemo(() => {
+    const speakers = new Map<string, { name: string; lines: number; episodes: Set<string> }>();
+    episodes.forEach((episode) => episode.events.forEach((event) => {
+      if (event.type !== "dialogue" || !event.speaker) return;
+      const key = event.speaker.trim().toUpperCase();
+      const current = speakers.get(key) || { name: event.speaker.trim(), lines: 0, episodes: new Set<string>() };
+      current.lines += 1;
+      current.episodes.add(episode.episode_id);
+      speakers.set(key, current);
+    }));
+    return Array.from(speakers.values()).sort((a, b) => b.lines - a.lines).slice(0, 8);
+  }, [episodes]);
 
   const adjustingEpisode = useMemo(
     () => episodes.find((episode) => episode.episode_id === adjustingPromo?.episode) || null,
@@ -235,10 +260,11 @@ export function View3RankedPromos({
       md += `- ${r}\n`;
     }
     md += `\n## Master Ranked Promos\n\n`;
-    md += `| Rank | Candidate Key | Ep | In | Out | Dur | Score | Status | Why It Works |\n`;
-    md += `|---|---|---|---|---|---|---|---|---|\n`;
+    md += `| Rank | Candidate Key | Ep | In | Out | Dur | Raw Score | Series Adj. | Ranking Score | Status | Why It Works |\n`;
+    md += `|---|---|---|---|---|---|---|---|---|---|---|\n`;
     for (const p of promos) {
-      md += `| #${p.global_rank} | \`${p.candidate_key}\` | ${p.episode} | ${p.start_clock} | ${p.end_clock} | ${p.duration_seconds}s | ${p.scores.decision} | ${p.status} | ${p.why_it_works} |\n`;
+      const adjustment = p.ranking_adjustment ?? 0;
+      md += `| #${p.global_rank} | \`${p.candidate_key}\` | ${p.episode} | ${p.start_clock} | ${p.end_clock} | ${p.duration_seconds}s | ${p.scores.decision} | ${adjustment > 0 ? "+" : ""}${adjustment} | ${p.acquisition_score ?? p.scores.decision} | ${p.status} | ${p.why_it_works} |\n`;
     }
     downloadFile("report.md", md, "text/markdown");
   };
@@ -361,6 +387,26 @@ export function View3RankedPromos({
     const isApproved = promo.status === "approved";
     const isRejected = promo.status === "rejected";
     const isExpanded = !!expandedTranscripts[promo.id];
+    const isLargeTranscript = largeTranscriptId === promo.id;
+    const clipCharacters = Array.from(promo.transcript_lines.reduce((characters, line) => {
+      if (!line.speaker) return characters;
+      const key = line.speaker.trim().toUpperCase();
+      const current = characters.get(key) || { name: line.speaker.trim(), lines: 0, hook: false, cliffhanger: false };
+      current.lines += 1;
+      current.hook ||= line.is_hook;
+      current.cliffhanger ||= line.is_cliffhanger;
+      characters.set(key, current);
+      return characters;
+    }, new Map<string, { name: string; lines: number; hook: boolean; cliffhanger: boolean }>()).values());
+    const rankingScore = promo.acquisition_score ?? promo.scores.decision;
+    const severeFlags = promo.quality_flags.filter((flag) =>
+      ["soft hook", "possible fake cliffhanger", "needs context", "late-series spoiler risk"].includes(flag),
+    );
+    const decision = rankingScore < 70 || severeFlags.length >= 2
+      ? { label: "Hold — weak/risky pick", detail: "Do not advance automatically; the score or combined risks make this a poor final candidate.", tone: "red" }
+      : severeFlags.length === 1 || rankingScore < 80
+        ? { label: "Review risk", detail: `Promising, but verify ${severeFlags[0] || "the lower ranking score"} before production.`, tone: "amber" }
+        : { label: "Advance", detail: "Strong ranking score with no major automated risk flags; suitable for final production review.", tone: "emerald" };
 
     return (
       <div
@@ -411,9 +457,18 @@ export function View3RankedPromos({
                 )}
                 {promo.acquisition_score !== undefined && (
                   <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-500/30">
-                    Acquisition: {promo.acquisition_score}/100
+                    Ranking Score: {promo.acquisition_score}/100
                   </span>
                 )}
+                <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
+                  decision.tone === "emerald"
+                    ? "bg-emerald-950/50 text-emerald-300 border-emerald-500/40"
+                    : decision.tone === "amber"
+                      ? "bg-amber-950/50 text-amber-300 border-amber-500/40"
+                      : "bg-red-950/50 text-red-300 border-red-500/40"
+                }`} title={decision.detail}>
+                  Final check: {decision.label}
+                </span>
                 {promo.quality_flags.includes("late-series spoiler risk") && (
                   <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-red-950/60 text-red-300 border border-red-500/40 flex items-center gap-1">
                     <AlertTriangle size={11} /> Late-Series Spoiler Risk
@@ -535,11 +590,11 @@ export function View3RankedPromos({
               </p>
             </div>
 
-            <div>
-              <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">
-                Why It Works:
+            <div className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-amber-500/[0.08] to-transparent p-3.5">
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-300 uppercase tracking-wider">
+                <Sparkles size={13} /> Editorial reasoning
               </span>
-              <p className="text-neutral-200 mt-0.5 leading-relaxed">
+              <p className="text-neutral-100 mt-1.5 text-[13px] leading-6">
                 {promo.why_it_works}
               </p>
             </div>
@@ -550,10 +605,21 @@ export function View3RankedPromos({
             <div>
               <div className="flex items-center justify-between border-b border-neutral-800 pb-2 mb-2">
                 <span className="font-semibold text-neutral-300">
-                  Decision Score
+                  Ranking Score
                 </span>
                 <span className="text-base font-bold text-amber-400 font-mono">
-                  {promo.scores.decision} / 100
+                  {promo.acquisition_score ?? promo.scores.decision} / 100
+                </span>
+              </div>
+
+              <div className="mb-2 flex items-center justify-between text-[11px] text-neutral-400">
+                <span>Raw decision blend</span>
+                <span className="font-mono text-neutral-200">{promo.scores.decision}</span>
+              </div>
+              <div className="mb-2 flex items-center justify-between text-[11px] text-neutral-400">
+                <span>Series adjustment</span>
+                <span className={`font-mono ${(promo.ranking_adjustment ?? 0) < 0 ? "text-red-300" : (promo.ranking_adjustment ?? 0) > 0 ? "text-emerald-300" : "text-neutral-300"}`}>
+                  {(promo.ranking_adjustment ?? 0) > 0 ? "+" : ""}{promo.ranking_adjustment ?? 0}
                 </span>
               </div>
 
@@ -595,22 +661,65 @@ export function View3RankedPromos({
           </div>
         </div>
 
+        {/* Clip-specific character widgets */}
+        {clipCharacters.length > 0 && (
+          <div className="mt-4 rounded-xl border border-neutral-800 bg-neutral-950/70 p-3.5">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-300">
+                <Users size={13} /> Characters in this promo
+              </span>
+              <span className="text-[10px] text-neutral-500">Generated from the selected cut</span>
+            </div>
+            <div className="flex flex-wrap gap-2.5">
+              {clipCharacters.map((character, index) => {
+                const initials = character.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+                const gradients = ["from-rose-500 to-orange-500", "from-violet-500 to-fuchsia-500", "from-cyan-500 to-blue-600", "from-emerald-500 to-teal-600", "from-amber-400 to-red-500", "from-indigo-500 to-purple-600"];
+                return (
+                  <div key={character.name} className="flex min-w-[210px] items-center gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-3">
+                    <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${gradients[index % gradients.length]} text-sm font-black text-white shadow-lg`}>{initials}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-bold text-white">{character.name}</div>
+                      <div className="mt-1 text-[10px] text-neutral-500">{character.lines} dialogue line{character.lines === 1 ? "" : "s"}</div>
+                      <div className="mt-1 flex gap-1">
+                        {character.hook && <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300">OPENS CLIP</span>}
+                        {character.cliffhanger && <span className="rounded bg-purple-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-purple-300">ENDS CLIP</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Transcript Preview Toggle */}
         <div className="mt-4 pt-3 border-t border-neutral-800/80">
-          <button
-            type="button"
-            onClick={() => toggleTranscript(promo.id)}
-            className="text-xs text-neutral-400 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
-          >
-            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            <span>
-              {isExpanded ? "Hide" : "Show"} Transcript Lines inside Cut (
-              {promo.transcript_lines.length} events)
-            </span>
-          </button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => toggleTranscript(promo.id)}
+              className="text-xs text-neutral-400 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              <span>
+                {isExpanded ? "Hide" : "Show"} Transcript Lines inside Cut (
+                {promo.transcript_lines.length} events)
+              </span>
+            </button>
+            {isExpanded && (
+              <button
+                type="button"
+                onClick={() => setLargeTranscriptId(isLargeTranscript ? null : promo.id)}
+                className="flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-[10px] font-semibold text-neutral-300 hover:border-amber-500/40 hover:text-white"
+              >
+                {isLargeTranscript ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                {isLargeTranscript ? "Compact reader" : "Expand reader"}
+              </button>
+            )}
+          </div>
 
           {isExpanded && (
-            <div className="mt-3 p-3 rounded-lg bg-neutral-950 border border-neutral-800 space-y-2 max-h-64 overflow-y-auto font-mono text-xs">
+            <div className={`mt-3 p-3 rounded-lg bg-neutral-950 border space-y-2 overflow-y-auto font-mono text-xs transition-all ${isLargeTranscript ? "max-h-[72vh] border-amber-500/40 p-5" : "max-h-64 border-neutral-800"}`}>
               {promo.transcript_lines.map((t, idx) => (
                 <div
                   key={idx}
@@ -790,6 +899,33 @@ export function View3RankedPromos({
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200">
           This run was cancelled. Only candidates completed before cancellation are shown.
         </div>
+      )}
+
+      {castPreview.length > 0 && (
+        <section className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-300">Character roster</div>
+              <p className="mt-0.5 text-xs text-neutral-500">Generated from canonical screenplay speakers—no invented photographs.</p>
+            </div>
+            <span className="rounded-full border border-neutral-700 bg-neutral-950 px-2.5 py-1 text-[10px] text-neutral-400">{castPreview.length} featured</span>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {castPreview.map((character, index) => {
+              const initials = character.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+              const gradients = ["from-rose-500 to-orange-500", "from-violet-500 to-fuchsia-500", "from-cyan-500 to-blue-600", "from-emerald-500 to-teal-600", "from-amber-400 to-red-500", "from-indigo-500 to-purple-600"];
+              return (
+                <div key={character.name} className="flex min-w-[190px] items-center gap-3 rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${gradients[index % gradients.length]} font-black text-white shadow-lg`}>{initials}</div>
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-bold text-white" title={character.name}>{character.name}</div>
+                    <div className="mt-1 text-[10px] text-neutral-500">{character.lines} lines · {character.episodes.size} ep{character.episodes.size === 1 ? "" : "s"}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {/* Dual View Mode Switcher */}

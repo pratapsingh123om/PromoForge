@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { zipSync } from "fflate";
 
 const output = path.resolve("tests/fixtures");
 fs.mkdirSync(output, { recursive: true });
@@ -88,9 +89,28 @@ write("very_short.txt", screenplay(11).replace(/Scene end: \([^\n]+\)/, "Scene e
 write("large_episode.txt", screenplay(12, { long: true }));
 write("episode [013] – café reunion.txt", screenplay(13));
 write("overlap_os_sound.txt", screenplay(14, { osLabels: true }));
+write(
+  "overlapping_dialogue_boundary.txt",
+  screenplay(16)
+    .replace(
+      "SOUND FX\nStart: (00:22.00) | End: (00:25.00)\nA dramatic metallic impact echoes through the station.",
+      "PRUDENCE VALE (shaken)\nStart: (00:21.80) | End: (00:25.30)\nWe cannot stay here after what they did to the clinic.",
+    )
+    .replace(
+      "ACTION\nStart: (00:25.00) | End: (00:31.00)",
+      "ACTION\nStart: (00:25.10) | End: (00:31.00)",
+    ),
+);
 write("oversize.txt", `${screenplay(15)}\n${"x".repeat(5 * 1024 * 1024)}`);
 write("not_a_script.pdf", Buffer.from("%PDF-1.4\n% invented placeholder for upload rejection\n", "utf8"));
 write("image.png", Buffer.from("89504e470d0a1a0a", "hex"));
+write(
+  "invented_series.zip",
+  Buffer.from(zipSync({
+    "Invented Series/episode-001.txt": Buffer.from(screenplay(1)),
+    "Invented Series/episode-002.txt": Buffer.from(screenplay(2)),
+  })),
+);
 
 const hundred = path.join(output, "100_files");
 fs.mkdirSync(hundred, { recursive: true });

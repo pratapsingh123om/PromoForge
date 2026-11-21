@@ -114,6 +114,9 @@ export function createRunExportFiles(
     "start",
     "end",
     "duration_seconds",
+    "raw_decision_score",
+    "series_adjustment",
+    "ranking_score",
     "hook_line",
     "cliffhanger_line",
     "why",
@@ -131,6 +134,9 @@ export function createRunExportFiles(
         segment.start_clock,
         segment.end_clock,
         segment.duration_seconds,
+        promo.scores.decision,
+        promo.ranking_adjustment ?? 0,
+        promo.acquisition_score ?? promo.scores.decision,
         promo.hook_line,
         promo.cliffhanger_line,
         promo.why_it_works,
@@ -161,8 +167,11 @@ export function createRunExportFiles(
   whyTop3.forEach((reason) => { report += `- ${reason}\n`; });
   report += "\n## Ranked promos\n\n";
   promos.forEach((promo) => {
+    const adjustment = promo.ranking_adjustment ?? 0;
+    const rankingScore = promo.acquisition_score ?? promo.scores.decision;
     report += `### #${promo.global_rank} ${promo.candidate_key}\n\n`;
     report += `- Window: ${promo.start_clock}–${promo.end_clock} (${promo.duration_seconds}s)\n`;
+    report += `- Ranking score: ${rankingScore} (raw ${promo.scores.decision}; series adjustment ${adjustment > 0 ? "+" : ""}${adjustment})\n`;
     report += `- Hook: ${promo.hook_speaker}: “${promo.hook_line}”\n`;
     report += `- Cliffhanger: ${promo.cliffhanger_speaker}: “${promo.cliffhanger_line}”\n`;
     report += `- Why: ${promo.why_it_works}\n- Flags: ${promo.quality_flags.join(", ") || "none"}\n\n`;

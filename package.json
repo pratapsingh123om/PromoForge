@@ -12,6 +12,7 @@
     "test:predeploy": "node scripts/generate_predeploy_fixtures.mjs && tsc -p tsconfig.predeploy.json && node scripts/run_predeploy_gate.mjs"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "lucide-react": "1.74.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

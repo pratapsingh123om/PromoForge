@@ -1,6 +1,28 @@
+import { unzipSync } from "fflate";
+
 export const MAX_UPLOAD_FILES = 100;
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 export const MAX_BATCH_BYTES = 50 * 1024 * 1024;
+
+export function folderNameFromRelativePath(relativePath: string): string {
+  const normalized = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  return normalized.includes("/") ? normalized.split("/")[0].trim() : "";
+}
+
+export interface ZipScreenplayEntry {
+  name: string;
+  bytes: Uint8Array;
+}
+
+export function extractZipScreenplays(archiveBytes: Uint8Array): ZipScreenplayEntry[] {
+  const entries = unzipSync(archiveBytes);
+  return Object.entries(entries)
+    .filter(([name]) => name.toLowerCase().endsWith(".txt") && !name.endsWith("/"))
+    .map(([name, bytes]) => ({
+      name: name.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) || "episode.txt",
+      bytes,
+    }));
+}
 
 export function decodeUtf8Buffer(buffer: ArrayBuffer | Uint8Array): string {
   let text: string;

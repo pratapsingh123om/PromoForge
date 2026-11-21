@@ -11,6 +11,11 @@ import {
   Cpu,
   Coins,
   Timer,
+  Users,
+  MessagesSquare,
+  Clapperboard,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import type { ParsedEpisode } from "../services/screenplayEngine";
 
@@ -37,6 +42,71 @@ interface View2Props {
   onViewRanked: () => void;
 }
 
+interface CharacterProfile {
+  name: string;
+  initials: string;
+  dialogueLines: number;
+  episodeCount: number;
+  episodeIds: string[];
+  spokenMs: number;
+}
+
+const CHARACTER_PALETTES = [
+  ["#f59e0b", "#ef4444", "#451a03"],
+  ["#8b5cf6", "#ec4899", "#2e1065"],
+  ["#06b6d4", "#3b82f6", "#082f49"],
+  ["#10b981", "#14b8a6", "#052e16"],
+  ["#f97316", "#eab308", "#431407"],
+  ["#6366f1", "#a855f7", "#1e1b4b"],
+  ["#e11d48", "#f97316", "#4c0519"],
+  ["#84cc16", "#22c55e", "#1a2e05"],
+] as const;
+
+function characterSeed(name: string) {
+  return Array.from(name).reduce((total, character) => ((total * 31) + character.charCodeAt(0)) >>> 0, 7);
+}
+
+function characterInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function CharacterAvatar({ name, size = "large" }: { name: string; size?: "small" | "large" }) {
+  const seed = characterSeed(name);
+  const palette = CHARACTER_PALETTES[seed % CHARACTER_PALETTES.length];
+  const angle = 115 + (seed % 85);
+  const accentPosition = 18 + (seed % 58);
+  const dimension = size === "large" ? "h-16 w-16" : "h-10 w-10";
+
+  return (
+    <div
+      className={`${dimension} relative shrink-0 overflow-hidden rounded-2xl border border-white/15 shadow-lg`}
+      style={{
+        background: `linear-gradient(${angle}deg, ${palette[2]} 0%, ${palette[0]} 52%, ${palette[1]} 100%)`,
+        boxShadow: `0 16px 35px ${palette[0]}22`,
+      }}
+      aria-label={`${name} generated avatar`}
+    >
+      <div
+        className="absolute h-14 w-14 rounded-full border border-white/20 bg-white/10 blur-[0.2px]"
+        style={{ left: `${accentPosition - 28}%`, top: "-42%" }}
+      />
+      <div
+        className="absolute -bottom-5 -right-4 h-12 w-12 rotate-45 border border-white/15 bg-black/20"
+      />
+      <div className="absolute inset-0 flex items-center justify-center font-black tracking-tight text-white drop-shadow-md">
+        <span className={size === "large" ? "text-xl" : "text-sm"}>{characterInitials(name)}</span>
+      </div>
+      <div className="absolute bottom-1 left-1 h-1.5 w-1.5 rounded-full bg-white/70" />
+    </div>
+  );
+}
+
 export function View2Progress({
   episodes,
   progressStates,
@@ -51,6 +121,7 @@ export function View2Progress({
   onCancel,
   onViewRanked,
 }: View2Props) {
+  const [showAllCharacters, setShowAllCharacters] = React.useState(false);
   const completedCount = Object.values(progressStates).filter(
     (s) => s.status === "done"
   ).length;
@@ -62,6 +133,44 @@ export function View2Progress({
     episodes.length > 0
       ? Math.round((completedCount / episodes.length) * 100)
       : 100;
+  const discoveredCharacters = React.useMemo<CharacterProfile[]>(() => {
+    const hasStarted = Object.values(progressStates).some((state) => state.status !== "queued");
+    const visibleEpisodes = episodes.filter((episode) => {
+      const state = progressStates[episode.episode_id];
+      return !isRunning || !hasStarted || state?.status === "running" || state?.status === "done";
+    });
+    const profiles = new Map<string, Omit<CharacterProfile, "initials" | "episodeCount" | "episodeIds"> & { episodes: Set<string> }>();
+
+    visibleEpisodes.forEach((episode) => {
+      episode.events.forEach((event) => {
+        if (event.type !== "dialogue" || !event.speaker?.trim()) return;
+        const name = event.speaker.trim().replace(/\s+/g, " ");
+        const key = name.toLocaleUpperCase();
+        const current = profiles.get(key) || {
+          name,
+          dialogueLines: 0,
+          spokenMs: 0,
+          episodes: new Set<string>(),
+        };
+        current.dialogueLines += 1;
+        current.spokenMs += Math.max(0, event.end_ms - event.start_ms);
+        current.episodes.add(episode.episode_id);
+        profiles.set(key, current);
+      });
+    });
+
+    return Array.from(profiles.values())
+      .map((profile) => ({
+        name: profile.name,
+        initials: characterInitials(profile.name),
+        dialogueLines: profile.dialogueLines,
+        spokenMs: profile.spokenMs,
+        episodeCount: profile.episodes.size,
+        episodeIds: Array.from(profile.episodes).sort(),
+      }))
+      .sort((left, right) => right.dialogueLines - left.dialogueLines || left.name.localeCompare(right.name));
+  }, [episodes, progressStates, isRunning]);
+  const visibleCharacters = showAllCharacters ? discoveredCharacters : discoveredCharacters.slice(0, 8);
 
   return (
     <div className="space-y-6">
@@ -225,6 +334,96 @@ export function View2Progress({
           })}
         </div>
       </div>
+
+      {/* Per-Episode Status Grid */}
+      <section className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-neutral-800 bg-gradient-to-r from-amber-500/10 via-purple-500/5 to-transparent p-5">
+          <div>
+            <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-amber-300">
+              <Users size={14} />
+              Character intelligence
+            </div>
+            <h3 className="text-lg font-semibold text-white">Cast discovered from the screenplay</h3>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-neutral-400">
+              Profiles appear as episodes are processed. Visual identities are generated locally from each canonical character name, so they stay distinct and consistent without invented headshots.
+            </p>
+          </div>
+          <div className="rounded-lg border border-neutral-700 bg-neutral-950/80 px-3 py-2 text-right">
+            <div className="text-xl font-bold text-white">{discoveredCharacters.length}</div>
+            <div className="text-[10px] uppercase tracking-wider text-neutral-500">characters found</div>
+          </div>
+        </div>
+
+        {visibleCharacters.length > 0 ? (
+          <div className="p-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {visibleCharacters.map((character, index) => {
+                const role = index < 2
+                  ? "Lead voice"
+                  : character.episodeCount > 1
+                    ? "Recurring"
+                    : "Supporting";
+                return (
+                  <article
+                    key={character.name}
+                    className="group relative overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 p-4 transition-all hover:-translate-y-0.5 hover:border-neutral-700 hover:shadow-xl"
+                  >
+                    <div className="absolute -right-7 -top-7 h-24 w-24 rounded-full bg-white/[0.025] transition-transform group-hover:scale-125" />
+                    <div className="relative flex items-start gap-3">
+                      <CharacterAvatar name={character.name} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-bold text-white" title={character.name}>
+                          {character.name}
+                        </div>
+                        <div className="mt-1 inline-flex rounded-full border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-neutral-400">
+                          {role}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="relative mt-4 grid grid-cols-2 gap-2">
+                      <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-2">
+                        <div className="flex items-center gap-1 text-[10px] uppercase text-neutral-500">
+                          <MessagesSquare size={11} /> Lines
+                        </div>
+                        <div className="mt-0.5 font-mono text-sm font-bold text-neutral-200">{character.dialogueLines}</div>
+                      </div>
+                      <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-2">
+                        <div className="flex items-center gap-1 text-[10px] uppercase text-neutral-500">
+                          <Clapperboard size={11} /> Episodes
+                        </div>
+                        <div className="mt-0.5 font-mono text-sm font-bold text-neutral-200">{character.episodeCount}</div>
+                      </div>
+                    </div>
+                    <div className="relative mt-3 truncate text-[10px] text-neutral-500" title={character.episodeIds.join(", ")}>
+                      Seen in {character.episodeIds.slice(0, 3).join(", ")}{character.episodeIds.length > 3 ? ` +${character.episodeIds.length - 3}` : ""}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            {discoveredCharacters.length > 8 && (
+              <button
+                type="button"
+                onClick={() => setShowAllCharacters((current) => !current)}
+                className="mx-auto mt-4 flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-xs font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:text-white"
+              >
+                {showAllCharacters ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {showAllCharacters ? "Show featured cast" : `Show all ${discoveredCharacters.length} characters`}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 p-5 text-sm text-neutral-500">
+            <div className="flex -space-x-2">
+              {["Cast", "Voices", "Roles"].map((label) => (
+                <div key={label} className="h-10 w-10 animate-pulse rounded-xl border border-neutral-700 bg-neutral-800" />
+              ))}
+            </div>
+            Characters will appear when screenplay dialogue is indexed.
+          </div>
+        )}
+      </section>
 
       {/* Per-Episode Status Grid */}
       <div className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 space-y-3">

@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Settings,
-  Key,
   FolderOpen,
   ArrowRight,
   Info,
@@ -28,6 +27,8 @@ import {
 import {
   MAX_BATCH_BYTES,
   MAX_UPLOAD_FILES,
+  folderNameFromRelativePath,
+  extractZipScreenplays,
   readUtf8ScreenplayFile,
 } from "../services/uploadValidation";
 
@@ -35,7 +36,6 @@ export interface ModelSettings {
   provider: "fallback" | "gemini" | "openai" | "no-api";
   modelName: string;
   baseUrl: string;
-  apiKey: string;
   temperature: number;
   maxTokens: number;
 }
@@ -73,14 +73,59 @@ export function View1StartUpload({
   const [parseFailures, setParseFailures] = useState<ParseFailure[]>([]);
   const [language, setLanguage] = useState("en");
   const [targetAudience, setTargetAudience] = useState("");
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState({ completed: 0, total: 0 });
   const parseRunRef = useRef(0);
+  const titleEditedThisSessionRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const processFiles = async (files: FileList | File[]) => {
-    const selectedFiles = Array.from(files);
+    const sourceFiles = Array.from(files);
+    const failures: ParseFailure[] = [];
+    const selectedFiles: File[] = [];
+    let archiveTitle = "";
+
+    if (sourceFiles.reduce((total, file) => total + file.size, 0) > MAX_BATCH_BYTES) {
+      setParsedEpisodes([]);
+      setParseFailures([{
+        source_name: "Selected batch",
+        message: "Compressed upload exceeds the 50 MB limit. Split it into smaller batches.",
+        line_number: null,
+      }]);
+      showToast({ message: "Upload batch exceeds the 50 MB limit.", type: "warning" });
+      return;
+    }
+
+    for (const file of sourceFiles) {
+      if (file.name.toLowerCase().endsWith(".txt")) {
+        selectedFiles.push(file);
+        continue;
+      }
+      if (file.name.toLowerCase().endsWith(".zip")) {
+        try {
+          const entries = extractZipScreenplays(new Uint8Array(await file.arrayBuffer()));
+          if (entries.length === 0) {
+            failures.push({ source_name: file.name, message: "ZIP contains no .txt screenplay files.", line_number: null });
+            continue;
+          }
+          archiveTitle ||= file.name.replace(/\.zip$/i, "").trim();
+          entries.forEach((entry) => {
+            selectedFiles.push(new File([entry.bytes], entry.name, { type: "text/plain" }));
+          });
+        } catch {
+          failures.push({ source_name: file.name, message: "ZIP could not be opened. Upload a valid archive containing UTF-8 .txt episodes.", line_number: null });
+        }
+        continue;
+      }
+      failures.push({
+        source_name: file.name,
+        message: "Unsupported file type. Select UTF-8 .txt screenplays or one .zip series archive.",
+        line_number: null,
+      });
+    }
+
     if (selectedFiles.length > MAX_UPLOAD_FILES) {
       setParsedEpisodes([]);
       setParseFailures([{
@@ -105,15 +150,8 @@ export function View1StartUpload({
     const runId = ++parseRunRef.current;
     setIsParsing(true);
     setParseProgress({ completed: 0, total: selectedFiles.length });
-    const txtFiles = selectedFiles.filter((file) => file.name.toLowerCase().endsWith(".txt"));
-    setParseProgress({ completed: selectedFiles.length - txtFiles.length, total: selectedFiles.length });
-    const failures: ParseFailure[] = selectedFiles
-      .filter((file) => !file.name.toLowerCase().endsWith(".txt"))
-      .map((file) => ({
-        source_name: file.name,
-        message: "Unsupported file type. Select UTF-8 .txt screenplays only.",
-        line_number: null,
-      }));
+    const txtFiles = selectedFiles;
+    setParseProgress({ completed: 0, total: selectedFiles.length });
     if (txtFiles.length === 0) {
       setParsedEpisodes([]);
       setParseFailures(failures);
@@ -160,9 +198,15 @@ export function View1StartUpload({
     newEpisodes.sort((a, b) => a.episode_number - b.episode_number);
     setParsedEpisodes(newEpisodes);
     setParseFailures(failures);
-    if (!showTitle && txtFiles.length) {
-      const relativePath = txtFiles[0].webkitRelativePath;
-      setShowTitle(relativePath.includes("/") ? relativePath.split("/")[0] : "");
+    if (txtFiles.length) {
+      const folderTitle = archiveTitle || folderNameFromRelativePath(txtFiles[0].webkitRelativePath);
+      if (folderTitle) {
+        setShowTitle(folderTitle);
+        titleEditedThisSessionRef.current = false;
+      } else if (!titleEditedThisSessionRef.current) {
+        // Never carry a previous run's title into a new loose-file upload.
+        setShowTitle("");
+      }
     }
     showToast({
       message: `${newEpisodes.length} file${newEpisodes.length === 1 ? "" : "s"} parsed; ${failures.length} failed. Review every row before running.`,
@@ -187,6 +231,7 @@ export function View1StartUpload({
     setParseFailures([]);
     setLanguage("en");
     setShowTitle(SAMPLE_SHOW_NAME);
+    titleEditedThisSessionRef.current = false;
     showToast({
       message: `Loaded invented sample series: "${SAMPLE_SHOW_NAME}" (2 episodes).`,
       type: "success",
@@ -209,14 +254,14 @@ export function View1StartUpload({
           <div>
             <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 mb-2">
               <Sparkles size={12} />
-              View 1: Screenplay Ingestion & Parse Verification
+              Start here
             </div>
             <h1 className="text-xl font-bold text-white tracking-tight">
-              Upload Screenplays & Verify Line Timestamps
+              Upload a series. Get its best promos.
             </h1>
             <p className="text-sm text-neutral-300 mt-1 max-w-2xl leading-relaxed">
-              Drop timestamped microdrama episode scripts. {PRODUCT_NAME} validates required headers,
-              block timings, parse coverage, and possible unresolved aliases before candidate generation.
+              Choose a folder of episode scripts. {PRODUCT_NAME} checks every file, ranks the strongest clips,
+              and keeps the finished series in your Library.
             </p>
           </div>
           <button
@@ -228,6 +273,12 @@ export function View1StartUpload({
             Load Invented Sample
           </button>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {["1  Upload episodes", "2  Run discovery", "3  Review & export"].map((step, index) => (
+          <div key={step} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${index === 0 ? "border-amber-500/40 bg-amber-500/10 text-amber-300" : "border-neutral-800 bg-neutral-900 text-neutral-500"}`}>{step}</div>
+        ))}
       </div>
 
       {/* Grid: Dropzone & Settings */}
@@ -251,14 +302,14 @@ export function View1StartUpload({
               <Upload size={28} />
             </div>
             <h3 className="text-base font-semibold text-white">
-              Drop screenplay .txt files or folder here
+              Drop a series folder, ZIP, or screenplay files here
             </h3>
             <p className="text-xs text-neutral-400 mt-1 max-w-md">
               Supports standard timestamped format with <code className="text-amber-300">SCENE</code> headings,
               dialogue blocks, and <code className="text-amber-300">Start: (mm:ss.ff) | End: (mm:ss.ff)</code>.
             </p>
             <p className="mt-2 text-[11px] text-neutral-500">
-              UTF-8 `.txt` only · max 5 MB per file · max 100 files / 50 MB per batch
+              UTF-8 `.txt` or `.zip` · max 5 MB per screenplay · max 100 episodes / 50 MB unpacked
             </p>
 
             <div className="flex items-center gap-3 mt-4">
@@ -266,7 +317,7 @@ export function View1StartUpload({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".txt"
+                accept=".txt,.zip"
                 className="hidden"
                 onChange={(e) => e.target.files && void processFiles(e.target.files)}
               />
@@ -308,7 +359,7 @@ export function View1StartUpload({
         <div className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 space-y-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-white border-b border-neutral-800 pb-2">
             <Sliders size={16} className="text-amber-400" />
-            <span>Run Parameters</span>
+            <span>Series setup</span>
           </div>
 
           <div>
@@ -318,12 +369,25 @@ export function View1StartUpload({
             <input
               type="text"
               value={showTitle}
-              onChange={(e) => setShowTitle(e.target.value)}
+              onChange={(e) => {
+                titleEditedThisSessionRef.current = true;
+                setShowTitle(e.target.value);
+              }}
               placeholder="e.g. Glass Hearts"
               className="w-full px-3 py-1.5 text-sm rounded-md bg-neutral-950 border border-neutral-700 text-white placeholder-neutral-500 focus:outline-none focus:border-amber-500"
             />
           </div>
 
+          <button
+            type="button"
+            onClick={() => setShowAdvancedSettings((value) => !value)}
+            className="flex w-full items-center justify-between rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-xs font-medium text-neutral-300 hover:border-neutral-600"
+          >
+            <span>Scoring & advanced settings</span>
+            <span className="text-neutral-500">{showAdvancedSettings ? "Hide" : `${modelSettings.provider === "fallback" ? "Rule-only" : modelSettings.provider} · Change`}</span>
+          </button>
+
+          {showAdvancedSettings && (<>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-neutral-400 mb-1">Language</label>
@@ -411,53 +475,21 @@ export function View1StartUpload({
             </select>
           </div>
 
-          {modelSettings.provider !== "fallback" && modelSettings.provider !== "no-api" && (
+          {modelSettings.provider === "gemini" && (
             <div className="space-y-3 pt-2">
               <div>
-                <label className="block text-xs font-medium text-neutral-400 mb-1 flex items-center gap-1">
-                  <Key size={12} className="text-amber-400" /> API Key (In-Memory Only)
-                </label>
+                <label className="block text-xs font-medium text-neutral-400 mb-1">Gemini model</label>
                 <input
-                  type="password"
-                  value={modelSettings.apiKey}
-                  onChange={(e) =>
-                    setModelSettings({ ...modelSettings, apiKey: e.target.value })
-                  }
-                  placeholder={modelSettings.provider === "gemini" ? "Optional when backend .env is configured" : "Enter API key for session"}
-                  className="w-full px-3 py-1.5 text-sm rounded-md bg-neutral-950 border border-neutral-700 text-white placeholder-neutral-600 focus:outline-none focus:border-amber-500 font-mono text-xs"
+                  type="text"
+                  value={modelSettings.modelName}
+                  onChange={(e) => setModelSettings({ ...modelSettings, modelName: e.target.value })}
+                  placeholder="gemini-3.1-flash-lite"
+                  className="w-full px-3 py-1.5 text-xs rounded-md bg-neutral-950 border border-neutral-700 text-white"
                 />
-                <p className="text-[11px] text-neutral-500 mt-0.5">
-                  Kept in React memory only, sent to the configured backend for this request, and never persisted or logged by the app.
+                <p className="mt-1 text-[11px] text-emerald-300">
+                  Credentials are supplied only by the backend environment. This browser never accepts, stores, or transmits an API key field.
                 </p>
               </div>
-
-              {(modelSettings.provider === "openai" || modelSettings.provider === "gemini") && (
-                <div>
-                  <label className="block text-xs font-medium text-neutral-400 mb-1">
-                    {modelSettings.provider === "openai" ? "Base URL & Model" : "Gemini Model"}
-                  </label>
-                  {modelSettings.provider === "openai" && (
-                    <input
-                      type="text"
-                      value={modelSettings.baseUrl}
-                      onChange={(e) =>
-                        setModelSettings({ ...modelSettings, baseUrl: e.target.value })
-                      }
-                      placeholder="https://api.openai.com/v1"
-                      className="w-full px-3 py-1.5 text-xs rounded-md bg-neutral-950 border border-neutral-700 text-white mb-2"
-                    />
-                  )}
-                  <input
-                    type="text"
-                    value={modelSettings.modelName}
-                    onChange={(e) =>
-                      setModelSettings({ ...modelSettings, modelName: e.target.value })
-                    }
-                    placeholder="gpt-4o-mini"
-                    className="w-full px-3 py-1.5 text-xs rounded-md bg-neutral-950 border border-neutral-700 text-white"
-                  />
-                </div>
-              )}
             </div>
           )}
 
@@ -471,6 +503,7 @@ export function View1StartUpload({
               </span>
             </div>
           )}
+          </>)}
 
           <div className="pt-2">
             {parsedEpisodes.length > 1 ? (
@@ -496,13 +529,11 @@ export function View1StartUpload({
             <button
               type="button"
               disabled={
-                parsedEpisodes.length === 0 ||
-                (modelSettings.provider === "openai" && (!modelSettings.apiKey || !modelSettings.baseUrl || !modelSettings.modelName))
+                parsedEpisodes.length === 0 || !modelSettings.modelName
               }
               onClick={() => onRun({ language, targetAudience })}
               className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-semibold text-sm transition-all shadow-lg ${
-                parsedEpisodes.length > 0 &&
-                !(modelSettings.provider === "openai" && (!modelSettings.apiKey || !modelSettings.baseUrl || !modelSettings.modelName))
+                parsedEpisodes.length > 0 && modelSettings.modelName
                   ? "bg-amber-500 hover:bg-amber-400 text-neutral-950 shadow-amber-500/20 active:scale-98 cursor-pointer"
                   : "bg-neutral-800 text-neutral-500 cursor-not-allowed"
               }`}
@@ -524,6 +555,7 @@ export function View1StartUpload({
       </div>
 
       {/* Parse Summary Table (DEMO.md Section 4: must show before running) */}
+      {(parsedEpisodes.length > 0 || parseFailures.length > 0) && (
       <div className="p-5 rounded-xl bg-neutral-900 border border-neutral-800 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -632,6 +664,7 @@ export function View1StartUpload({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

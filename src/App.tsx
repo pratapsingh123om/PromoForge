@@ -10,12 +10,14 @@ import {
   Info,
   X,
   ExternalLink,
+  BookOpen,
 } from "lucide-react";
 
 import { View1StartUpload, type ModelSettings } from "./components/View1StartUpload";
 import { View2Progress, type EpisodeProgressState } from "./components/View2Progress";
 import { View3RankedPromos } from "./components/View3RankedPromos";
 import { View4QualityLimits } from "./components/View4QualityLimits";
+import { SeriesLibrary } from "./components/SeriesLibrary";
 
 import {
   generateEpisodePromosClient,
@@ -48,8 +50,14 @@ import {
   shortlistCandidatesForModel,
   type DemoRunRecord,
 } from "./services/demoRun";
+import {
+  loadSeriesLibrary,
+  persistSeriesLibrary,
+  INVENTED_LIBRARY_ID,
+  type SeriesLibraryEntry,
+} from "./services/seriesLibrary";
 
-export type ViewTab = "upload" | "progress" | "ranked" | "quality";
+export type ViewTab = "library" | "upload" | "progress" | "ranked" | "quality";
 
 export interface ToastItem {
   id: string;
@@ -96,7 +104,13 @@ const EMPTY_RUN_SUMMARY: RunCheckSummary = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ViewTab>("upload");
+  const [activeTab, setActiveTab] = useState<ViewTab>(() => {
+    const saved = sessionStorage.getItem("pf-active-tab");
+    return ["library", "upload", "progress", "ranked", "quality"].includes(saved || "")
+      ? (saved as ViewTab)
+      : "upload";
+  });
+  const [seriesLibrary, setSeriesLibrary] = useState<SeriesLibraryEntry[]>(loadSeriesLibrary);
 
   // Ingestion & Screenplay State
   const [showTitle, setShowTitle] = useState<string>(() => {
@@ -120,12 +134,11 @@ export default function App() {
     return interrupted;
   });
 
-  // Model & Provider State (RAM only for API Key)
+  // The browser chooses a scoring profile; provider credentials remain server-side.
   const [modelSettings, setModelSettings] = useState<ModelSettings>({
-    provider: "fallback",
-    modelName: "rule-based",
+    provider: "gemini",
+    modelName: "gemini-3.1-flash-lite",
     baseUrl: "https://api.openai.com/v1",
-    apiKey: "",
     temperature: DEFAULT_MODEL_TEMPERATURE,
     maxTokens: DEFAULT_MODEL_MAX_TOKENS,
   });
@@ -247,6 +260,56 @@ export default function App() {
     }
   }, [showTitle, parsedEpisodes, rankedPromos, whyTop3, whyTop10, allCandidatesByEpisode, runSummary, runRecord]);
 
+  useEffect(() => {
+    sessionStorage.setItem("pf-active-tab", activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    persistSeriesLibrary(seriesLibrary);
+  }, [seriesLibrary]);
+
+  useEffect(() => {
+    if (
+      isRunning ||
+      !runRecord ||
+      parsedEpisodes.length === 0 ||
+      Object.keys(progressStates).length > 0
+    ) return;
+    setProgressStates(Object.fromEntries(parsedEpisodes.map((episode) => [
+      episode.episode_id,
+      {
+        episode_id: episode.episode_id,
+        status: "done" as const,
+        stage: "Complete",
+        candidates_found: allCandidatesByEpisode[episode.episode_id]?.length ?? 0,
+      },
+    ])));
+    setCurrentStageIndex(STAGES.length);
+    setElapsedSeconds(runRecord.usage.wall_time_seconds ?? runSummary.wall_time_seconds ?? 0);
+    setModelCallsCount(runRecord.usage.model_calls ?? runSummary.model_calls ?? 0);
+    setTokenCount((runRecord.usage.input_tokens ?? 0) + (runRecord.usage.output_tokens ?? 0));
+  }, [allCandidatesByEpisode, isRunning, parsedEpisodes, progressStates, runRecord, runSummary]);
+
+  useEffect(() => {
+    if (!runRecord || rankedPromos.length === 0 || runRecord.run_id === INVENTED_LIBRARY_ID) return;
+    const entry: SeriesLibraryEntry = {
+      id: runRecord.run_id,
+      title: runRecord.show_title,
+      saved_at: runRecord.completed_at,
+      episodes: parsedEpisodes,
+      promos: rankedPromos,
+      why_top_3: whyTop3,
+      why_top_10: whyTop10,
+      candidates_by_episode: allCandidatesByEpisode,
+      run_summary: runSummary,
+      run_record: runRecord,
+    };
+    setSeriesLibrary((previous) => {
+      const withoutCurrent = previous.filter((item) => item.id !== entry.id);
+      return [entry, ...withoutCurrent];
+    });
+  }, [runRecord, rankedPromos, parsedEpisodes, whyTop3, whyTop10, allCandidatesByEpisode, runSummary]);
+
   const toScoreCandidates = (candidates: PromoCandidateItem[]): DemoScoreCandidateInput[] =>
     candidates.map((candidate) => ({
       candidate_id: candidate.id,
@@ -306,6 +369,7 @@ export default function App() {
     context,
     stageTimingsMs,
     scoreResponse,
+    rawModelResponses = [],
     modelCandidatesScored = 0,
     status,
     errors = [],
@@ -317,6 +381,7 @@ export default function App() {
     context: RunInputContext;
     stageTimingsMs: Record<string, number>;
     scoreResponse?: DemoScoreResponse;
+    rawModelResponses?: DemoRunRecord["raw_model_responses"];
     modelCandidatesScored?: number;
     status: DemoRunRecord["status"];
     errors?: string[];
@@ -376,9 +441,11 @@ export default function App() {
       check_summary: completedSummary,
       prompt_sha256: scoreResponse?.prompt_sha256 ?? null,
       errors,
-      raw_model_responses: scoreResponse
-        ? [{ filename: "model_response_001.json", content: scoreResponse.raw_response }]
-        : [],
+      raw_model_responses: rawModelResponses.length > 0
+        ? rawModelResponses
+        : scoreResponse
+          ? [{ filename: "model_response_001.json", content: scoreResponse.raw_response }]
+          : [],
     };
     setRankedPromos(ranked);
     setWhyTop3(top3Reasons);
@@ -462,6 +529,7 @@ export default function App() {
     let modelError: string | null = null;
     let modelCandidatesScored = 0;
     let scoreResponse: DemoScoreResponse | undefined;
+    let rawModelResponses: DemoRunRecord["raw_model_responses"] = [];
     stageLoop: for (let s = 0; s < STAGES.length; s++) {
       if (cancelRequestedRef.current) {
         cancelled = true;
@@ -580,7 +648,6 @@ export default function App() {
                 provider: modelSettings.provider,
                 model: modelSettings.modelName,
                 base_url: modelSettings.baseUrl,
-                api_key: modelSettings.apiKey || undefined,
                 temperature: modelSettings.temperature,
                 max_tokens: modelSettings.maxTokens,
               },
@@ -632,6 +699,7 @@ export default function App() {
             prompt_sha256: lastPromptSha,
             raw_response: JSON.stringify(accumulatedScores, null, 2),
           };
+          rawModelResponses = rawResponses;
         } catch (error) {
           modelError = error instanceof Error ? error.message : String(error);
           for (const episode of parsedEpisodes) {
@@ -678,6 +746,7 @@ export default function App() {
       context,
       stageTimingsMs,
       scoreResponse,
+      rawModelResponses,
       modelCandidatesScored,
       status,
       errors: modelError ? [modelError] : [],
@@ -864,6 +933,55 @@ export default function App() {
     );
   };
 
+  const clearCurrentWorkspace = () => {
+    setShowTitle("");
+    setParsedEpisodes([]);
+    setRankedPromos([]);
+    setWhyTop3([]);
+    setWhyTop10([]);
+    setAllCandidatesByEpisode({});
+    setRunSummary(EMPTY_RUN_SUMMARY);
+    setRunRecord(null);
+    setProgressStates({});
+    setCurrentStageIndex(0);
+    setElapsedSeconds(0);
+    setModelCallsCount(0);
+    setTokenCount(0);
+    setRunCancelled(false);
+    sessionStorage.removeItem("pf-approved-candidates");
+  };
+
+  const handleNewSeries = () => {
+    clearCurrentWorkspace();
+    setActiveTab("upload");
+  };
+
+  const handleOpenSeries = (entry: SeriesLibraryEntry) => {
+    setShowTitle(entry.title);
+    setParsedEpisodes(entry.episodes);
+    setRankedPromos(entry.promos);
+    setWhyTop3(entry.why_top_3);
+    setWhyTop10(entry.why_top_10);
+    setAllCandidatesByEpisode(entry.candidates_by_episode);
+    setRunSummary(entry.run_summary);
+    setRunRecord(entry.run_record);
+    setProgressStates(Object.fromEntries(entry.episodes.map((episode) => [
+      episode.episode_id,
+      {
+        episode_id: episode.episode_id,
+        status: "done" as const,
+        stage: "Complete",
+        candidates_found: entry.candidates_by_episode[episode.episode_id]?.length ?? 0,
+      },
+    ])));
+    setCurrentStageIndex(STAGES.length);
+    setElapsedSeconds(entry.run_record.usage.wall_time_seconds ?? entry.run_summary.wall_time_seconds ?? 0);
+    setModelCallsCount(entry.run_record.usage.model_calls ?? entry.run_summary.model_calls ?? 0);
+    setTokenCount((entry.run_record.usage.input_tokens ?? 0) + (entry.run_record.usage.output_tokens ?? 0));
+    setRunCancelled(false);
+    setActiveTab("ranked");
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans flex flex-col selection:bg-amber-500/30 selection:text-amber-200">
       {/* Top Navbar */}
@@ -903,6 +1021,21 @@ export default function App() {
           <nav className="flex w-full sm:w-auto items-center gap-1 overflow-x-auto bg-neutral-950 p-1 rounded-xl border border-neutral-800 text-xs">
             <button
               type="button"
+              onClick={() => setActiveTab("library")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
+                activeTab === "library"
+                  ? "bg-neutral-800 text-white shadow-sm"
+                  : "text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              <BookOpen size={14} className={activeTab === "library" ? "text-amber-400" : ""} />
+              <span>Library</span>
+              {seriesLibrary.length > 0 && (
+                <span className="rounded-full bg-neutral-700 px-1.5 text-[10px] text-neutral-200">{seriesLibrary.length}</span>
+              )}
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab("upload")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
                 activeTab === "upload"
@@ -911,7 +1044,7 @@ export default function App() {
               }`}
             >
               <Upload size={14} className={activeTab === "upload" ? "text-amber-400" : ""} />
-              <span>1. Start / Upload</span>
+              <span>Upload</span>
               {parsedEpisodes.length > 0 && (
                 <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-neutral-700 text-neutral-300 font-mono">
                   {parsedEpisodes.length}
@@ -929,7 +1062,7 @@ export default function App() {
               }`}
             >
               <Cpu size={14} className={activeTab === "progress" ? "text-amber-400" : ""} />
-              <span>2. Progress</span>
+              <span>Run status</span>
               {isRunning && <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />}
             </button>
 
@@ -943,7 +1076,7 @@ export default function App() {
               }`}
             >
               <Sparkles size={14} className={activeTab === "ranked" ? "text-amber-400" : ""} />
-              <span>3. Ranked Promos</span>
+              <span>Promos</span>
               {rankedPromos.length > 0 && (
                 <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 font-mono">
                   {rankedPromos.length}
@@ -961,7 +1094,7 @@ export default function App() {
               }`}
             >
               <ShieldAlert size={14} className={activeTab === "quality" ? "text-amber-400" : ""} />
-              <span>4. Quality & Limits</span>
+              <span>Quality</span>
               <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-400 font-mono">
                 Audit
               </span>
@@ -988,7 +1121,11 @@ export default function App() {
             The previous run was interrupted by a page reload. Parsed inputs and completed results were restored; start a new run to resume processing.
           </div>
         )}
-        {activeTab === "upload" && (
+        <div className={activeTab === "library" ? "block" : "hidden"}>
+          <SeriesLibrary entries={seriesLibrary} onOpen={handleOpenSeries} onNewSeries={handleNewSeries} />
+        </div>
+
+        <div className={activeTab === "upload" ? "block" : "hidden"}>
           <View1StartUpload
             parsedEpisodes={parsedEpisodes}
             setParsedEpisodes={(episodes) => {
@@ -1018,9 +1155,9 @@ export default function App() {
             onRun={handleRunPipeline}
             showToast={showToast}
           />
-        )}
+        </div>
 
-        {activeTab === "progress" && (
+        <div className={activeTab === "progress" ? "block" : "hidden"}>
           <View2Progress
             episodes={parsedEpisodes}
             progressStates={progressStates}
@@ -1035,9 +1172,9 @@ export default function App() {
             onCancel={handleCancelRun}
             onViewRanked={() => setActiveTab("ranked")}
           />
-        )}
+        </div>
 
-        {activeTab === "ranked" && (
+        <div className={activeTab === "ranked" ? "block" : "hidden"}>
           <View3RankedPromos
             promos={rankedPromos}
             episodes={parsedEpisodes}
@@ -1050,14 +1187,14 @@ export default function App() {
             onAdjustPromoBoundaries={handleAdjustPromoBoundaries}
             showToast={showToast}
           />
-        )}
+        </div>
 
-        {activeTab === "quality" && (
+        <div className={activeTab === "quality" ? "block" : "hidden"}>
           <View4QualityLimits
             runSummary={runSummary}
             totalEpisodesCount={parsedEpisodes.length}
           />
-        )}
+        </div>
       </main>
 
       {pendingManualRun && (

@@ -56,7 +56,10 @@ def build_scoring_prompt(payload: DemoScorePromptRequest) -> str:
         "- hook: 0-100 strength of the opening line as an immediate attention grabber\n"
         "- cliffhanger: 0-100 strength of the final line as an unresolved reason to continue\n"
         "- standalone: 0-100 clarity without context outside the cut\n"
-        "- why_it_works: one concise evidence-grounded sentence; never claim certainty\n\n"
+        "- why_it_works: 2-4 evidence-grounded sentences (maximum 450 characters) explaining "
+        "why the exact opening stops attention, how a specific middle beat escalates the story, "
+        "why the final line creates unresolved curiosity, and any standalone-context or spoiler risk; "
+        "quote or closely reference supplied lines and never claim certainty\n\n"
         "Return JSON only, matching the supplied schema. Candidate data:\n"
         f"{json.dumps(candidate_rows, ensure_ascii=False, separators=(',', ':'))}"
     )

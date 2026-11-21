@@ -3,8 +3,10 @@ import path from "node:path";
 
 import {
   generateEpisodePromosClient,
+  boundarySlicesDialogue,
   isSentenceFragment,
   parseScreenplayText,
+  promosConflict,
   rankAllEpisodesGlobally,
 } from "../node_modules/.cache/promoforge-audit/screenplayEngine.js";
 
@@ -44,7 +46,7 @@ for (const file of files) {
       "en",
     );
     episodes.push(episode);
-    candidates.push(...generateEpisodePromosClient(episode, 20, 60, summary));
+    candidates.push(...generateEpisodePromosClient(episode, 20, 60, summary, 5));
   } catch (error) {
     failures.push({
       file: path.basename(file),
@@ -59,6 +61,8 @@ let invalidBoundaryCount = 0;
 let fragmentStartCount = 0;
 let evidenceMismatchCount = 0;
 let overlapPairViolations = 0;
+let dialogueSliceViolations = 0;
+let continuationPairViolations = 0;
 
 for (const candidate of candidates) {
   const episode = episodesById.get(candidate.episode);
@@ -69,6 +73,10 @@ for (const candidate of candidates) {
   const starts = eligible.filter((event) => event.start_ms === segment.start_ms);
   const ends = eligible.filter((event) => event.end_ms === segment.end_ms);
   if (starts.length === 0 || ends.length === 0) invalidBoundaryCount += 1;
+  if (
+    boundarySlicesDialogue(episode.events, segment.start_ms) ||
+    boundarySlicesDialogue(episode.events, segment.end_ms)
+  ) dialogueSliceViolations += 1;
   if (starts.some((event) => isSentenceFragment(event.text))) fragmentStartCount += 1;
   if (
     !starts.some((event) => event.text === candidate.hook_line) ||
@@ -98,11 +106,19 @@ for (const group of candidatesByEpisode.values()) {
         second.end_ms - second.start_ms,
       );
       if (overlap / shorter > 0.2) overlapPairViolations += 1;
+      if (promosConflict(group[left], group[right]) && overlap / shorter <= 0.2) {
+        continuationPairViolations += 1;
+      }
     }
   }
 }
 
-const ranked = rankAllEpisodesGlobally(candidates, 2).ranked;
+const ranked = rankAllEpisodesGlobally(candidates, {
+  mode: "series",
+  varietyCap: 2,
+  qualityThreshold: 70,
+  topLimit: 25,
+}).ranked;
 const topEpisodeCounts = {};
 for (const candidate of ranked) {
   topEpisodeCounts[candidate.episode] = (topEpisodeCounts[candidate.episode] || 0) + 1;
@@ -118,13 +134,15 @@ const result = {
   total_events: episodes.reduce((total, episode) => total + episode.events.length, 0),
   raw_windows_examined: summary.candidates_generated,
   episode_shortlist_count: candidates.length,
-  top3_count: ranked.length,
-  top3_episode_counts: topEpisodeCounts,
+  ranked_count: ranked.length,
+  ranked_episode_counts: topEpisodeCounts,
   duration_violations: durationViolations,
   invalid_boundary_count: invalidBoundaryCount,
+  dialogue_slice_violation_count: dialogueSliceViolations,
   fragment_start_count: fragmentStartCount,
   evidence_mismatch_count: evidenceMismatchCount,
   overlap_pair_violations: overlapPairViolations,
+  continuation_pair_violations: continuationPairViolations,
   rejection_counts: summary,
   failures,
 };
@@ -134,10 +152,14 @@ if (
   failures.length ||
   durationViolations ||
   invalidBoundaryCount ||
+  dialogueSliceViolations ||
   fragmentStartCount ||
   evidenceMismatchCount ||
   overlapPairViolations ||
-  ranked.length > 3 ||
+  continuationPairViolations ||
+  ranked.length < 15 ||
+  ranked.length > 25 ||
+  Object.keys(topEpisodeCounts).length < 10 ||
   Object.values(topEpisodeCounts).some((count) => count > 2)
 ) {
   process.exitCode = 1;
