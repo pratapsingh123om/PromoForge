@@ -182,51 +182,156 @@
     </div>
   </div>
 
-  <h2>1. Problem Framing & Assumptions</h2>
-  <p>Vertical short-form drama platforms (TikTok, Reels, Shorts) rely entirely on hook retention to drive episode purchases. Discovering viral promotional cut points across 50 full-length episodes (~3,700 script events) is manually grueling. Naive LLM windowing fails in production due to <strong>dialogue slicing</strong> (cutting mid-speech), <strong>context collapse</strong> (unresolved pronouns like "He betrayed her"), <strong>continuation spoilers</strong> (a promo that answers its own cliffhanger), and <strong>late-series narrative spoilage</strong>.</p>
+  <h2>1. Problem Choice & Operational Framing</h2>
+  <p>I chose <strong>Problem 1 (Find the Promos)</strong> because discovering high-converting promotional cut points is the single most urgent operational bottleneck in vertical drama streaming. While other challenges drift toward speculative end-to-end video synthesis, promo selection is an immediate, business-critical editorial workflow with clear evaluation criteria:</p>
   
   <div class="grid-2">
     <div class="card">
-      <h3>Hard Editorial Invariants</h3>
+      <h3>Why Problem 1? (Strategic & Engineering Rationale)</h3>
       <ul>
-        <li><strong>Duration:</strong> Strictly bounded to 20.0s &ndash; 60.0s total runtime.</li>
-        <li><strong>Dialogue Boundary Validation:</strong> Zero cuts inside spoken dialogue lines (&lt;0.1s tolerance; text-only boundary check).</li>
-        <li><strong>Curiosity Hook & Gap:</strong> Opening hook in first 3.0s; ends on unresolved tension.</li>
-        <li><strong>Confidentiality:</strong> Zero proprietary screenplay text committed to public git.</li>
+        <li><strong>Immediate Operational Bottleneck:</strong> Editing teams manually comb through hours of episodic drama to find 30&ndash;60s acquisition hooks for TikTok, Reels, and YouTube Shorts under weekly release deadlines.</li>
+        <li><strong>Directly Measurable Business Impact:</strong> Top-of-funnel promo retention and click-through directly drive initial coin unlocks and subscriber acquisition curves.</li>
+        <li><strong>Realistic Series-Scale Verifiability:</strong> The 50 supplied episodes (~3,727 events) permit rigorous full-series stress testing against real-world production scale rather than isolated toy demos.</li>
+        <li><strong>Clean Division of Labor:</strong> High-precision deterministic code guarantees timing and boundary physics, while AI evaluates narrative tension, dramatic pacing, and curiosity gaps.</li>
+        <li><strong>Scoped for Editorial Utility:</strong> Focuses on solving candidate discovery and NLE cut-sheet generation rather than ungrounded &ldquo;virality&rdquo; hype or synthetic video hallucinations.</li>
       </ul>
     </div>
     <div class="card">
-      <h3>Human-in-the-Loop Philosophy</h3>
-      <p>AI proposes, ranks, and annotates; deterministic code guarantees timing invariants and boundary physics; human editors review, approve, re-trim on real line boundaries, and resolve flagged AI-heuristic disagreements.</p>
+      <h3>Hard Editorial Invariants & Operating Boundaries</h3>
+      <ul>
+        <li><strong>Duration Bounds:</strong> Strictly bounded to 20.0s &ndash; 60.0s total runtime.</li>
+        <li><strong>Dialogue Boundary Validation:</strong> Zero cuts inside spoken lines (&lt;0.1s tolerance against script event clocks; text-only boundary check).</li>
+        <li><strong>Curiosity Hook & Cliffhanger:</strong> Opening hook in first 3.0s; ends on maximum unresolved curiosity/tension without answering its own premise.</li>
+        <li><strong>Confidentiality Guarantee:</strong> Zero proprietary screenplay dialogue committed to public git or leaked to public models.</li>
+        <li><strong>Human-in-the-Loop Workflow:</strong> AI proposes, ranks, and annotates; editors retain final review, boundary trimming, and NLE export control.</li>
+      </ul>
     </div>
   </div>
 
-  <h2>2. System Architecture: Code vs. AI Boundary</h2>
-  <div class="diagram-box">
-<pre>
-+---------------------------------------------------------------------------------------------------------+
-|                                    DETERMINISTIC CODE ENGINE (TypeScript)                               |
-| * Millisecond Arithmetic (mm:ss.ff -> ms)                * Duration Bounds Filter [20.0s, 60.0s]        |
-| * Timestamped Dialogue-Boundary Validation (<0.1s check) * Overlap De-duplication (>= 4.0s or > 15%)     |
-| * Question-Answer Continuation Suppression               * Proportional Series Weight (+5 early, -6 late)|
-+----------------------------------------------------+----------------------------------------------------+
-                                                     | 146 Clean Accepted Candidates (153 in baseline)
-                                                     v
-+---------------------------------------------------------------------------------------------------------+
-|                                 AI SEMANTIC EVALUATION (gemini-3.1-flash-lite)                          |
-| * Structured JSON Output with Strict Schema Validation   * Shortlist Bounded: 70 scored (7 batches of 10|
-| * Cliffhanger Unresolvedness & Urgency (0-100)           * Standalone Clarity & Ambiguity Audit (0-100) |
-+----------------------------------------------------+----------------------------------------------------+
-                                                     | Reconciled Editorial Scores & Quality Badges
-                                                     v
-+---------------------------------------------------------------------------------------------------------+
-|                                   HUMAN EDITORIAL WORKSPACE (Vite Web App)                              |
-| * "Context Review Needed" Disagreement Flags            * Dialogue Boundary Nudge Controls             |
-| * Independent Review Counters (Approved/Rejected/Pending)* Multi-Format NLE Exports (EDL, OTIO, CSV, JSON|
-+---------------------------------------------------------------------------------------------------------+
-</pre>
+  <h2>2. System Architecture: Five-Layer Runtime & Division of Labor</h2>
+  <div style="margin: 3px 0 4px 0;">
+    <svg viewBox="0 0 760 216" style="width: 100%; height: auto; display: block; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+      <defs>
+        <marker id="arrSlate" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#475569" />
+        </marker>
+        <marker id="arrBlue" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563eb" />
+        </marker>
+        <marker id="arrTeal" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#0d9488" />
+        </marker>
+        <marker id="arrPurple" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#7c3aed" />
+        </marker>
+        <marker id="arrGreen" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#059669" />
+        </marker>
+      </defs>
+
+      <!-- Zone 1: Client Browser -->
+      <rect x="4" y="4" width="752" height="95" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4 3" />
+      <text x="12" y="14" font-size="7px" font-weight="700" fill="#64748b" letter-spacing="0.04em">BROWSER RUNTIME &bull; TYPESCRIPT / REACT 19 / VITE (DEPLOYED ON VERCEL)</text>
+
+      <!-- Layer 1 Card -->
+      <rect x="12" y="19" width="220" height="73" rx="4" fill="#ffffff" stroke="#93c5fd" stroke-width="1.2" />
+      <rect x="12" y="19" width="220" height="17" rx="4" fill="#eff6ff" />
+      <text x="18" y="31" font-size="7.6px" font-weight="700" fill="#1e40af">LAYER 1 &mdash; FRONTEND UI</text>
+      <text x="226" y="31" font-size="6.3px" font-weight="600" fill="#3b82f6" text-anchor="end">React 19 &bull; Vite &bull; Tailwind v4</text>
+      <text x="18" y="45" font-size="6.7px" fill="#334155">&bull; Screenplay upload &amp; 50-episode intake</text>
+      <text x="18" y="56" font-size="6.7px" fill="#334155">&bull; Real-time progress tracking &amp; execution log</text>
+      <text x="18" y="67" font-size="6.7px" fill="#334155">&bull; Multi-episode series mode selection</text>
+      <text x="18" y="78" font-size="6.7px" fill="#334155">&bull; Client state &amp; review inventory orchestration</text>
+
+      <!-- Arrow L1 -> L2 -->
+      <line x1="232" y1="56" x2="252" y2="56" stroke="#2563eb" stroke-width="1.3" marker-end="url(#arrBlue)" />
+      <rect x="233" y="47" width="18" height="9" rx="2" fill="#eff6ff" stroke="#bfdbfe" stroke-width="0.7" />
+      <text x="235" y="54" font-size="5.8px" font-weight="700" fill="#1d4ed8">Events</text>
+
+      <!-- Layer 2 Card -->
+      <rect x="254" y="19" width="248" height="73" rx="4" fill="#ffffff" stroke="#86efac" stroke-width="1.2" />
+      <rect x="254" y="19" width="248" height="17" rx="4" fill="#f0fdf4" />
+      <text x="260" y="31" font-size="7.6px" font-weight="700" fill="#166534">LAYER 2 &mdash; DETERMINISTIC ENGINE</text>
+      <text x="496" y="31" font-size="6.3px" font-weight="600" fill="#15803d" text-anchor="end">screenplayEngine.ts (TS)</text>
+      <text x="260" y="45" font-size="6.7px" fill="#334155">&bull; Integer-ms time parsing (mm:ss.ff &rarr; ms; zero drift)</text>
+      <text x="260" y="56" font-size="6.7px" fill="#334155">&bull; 20&ndash;60s duration window generation (10,883 formed)</text>
+      <text x="260" y="67" font-size="6.7px" fill="#334155">&bull; Timestamped dialogue-boundary validation (&lt;0.1s)</text>
+      <text x="260" y="78" font-size="6.7px" fill="#334155">&bull; Overlap &amp; continuation de-dup &rarr; 146 pool &rarr; 70 shortlist</text>
+
+      <!-- Layer 5 Card -->
+      <rect x="524" y="19" width="224" height="73" rx="4" fill="#ffffff" stroke="#fcd34d" stroke-width="1.2" />
+      <rect x="524" y="19" width="224" height="17" rx="4" fill="#fffbeb" />
+      <text x="530" y="31" font-size="7.6px" font-weight="700" fill="#92400e">LAYER 5 &mdash; EDITORIAL WORKSPACE</text>
+      <text x="742" y="31" font-size="6.3px" font-weight="600" fill="#b45309" text-anchor="end">Review &amp; NLE Export</text>
+      <text x="530" y="45" font-size="6.7px" fill="#334155">&bull; Matches JSON scores to candidate IDs</text>
+      <text x="530" y="56" font-size="6.7px" fill="#334155">&bull; Deterministic series weighting (+5 early, -6 late)</text>
+      <text x="530" y="67" font-size="6.7px" fill="#334155">&bull; Context Review flags &amp; boundary nudge controls</text>
+      <text x="530" y="78" font-size="6.7px" fill="#334155">&bull; Multi-format exports: CMX 3600 EDL, OTIO, CSV, JSON</text>
+
+      <!-- Zone 2: Serverless Backend & AI Cloud -->
+      <rect x="4" y="115" width="752" height="96" rx="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4 3" />
+      <text x="12" y="125" font-size="7px" font-weight="700" fill="#64748b" letter-spacing="0.04em">SERVERLESS BACKEND &amp; CLOUD AI &bull; PYTHON FASTAPI / GOOGLE GEMINI API</text>
+
+      <!-- Layer 3 Card -->
+      <rect x="95" y="130" width="280" height="73" rx="4" fill="#ffffff" stroke="#5eead4" stroke-width="1.2" />
+      <rect x="95" y="130" width="280" height="17" rx="4" fill="#f0fdfa" />
+      <text x="101" y="142" font-size="7.6px" font-weight="700" fill="#0f766e">LAYER 3 &mdash; BACKEND API SERVICE</text>
+      <text x="369" y="142" font-size="6.3px" font-weight="600" fill="#0d9488" text-anchor="end">FastAPI &bull; Python 3.12 (Vercel /api)</text>
+      <text x="101" y="156" font-size="6.7px" fill="#334155">&bull; Served under /api; Vercel routes /api/* to Python runtime</text>
+      <text x="101" y="167" font-size="6.7px" fill="#334155">&bull; Primary endpoint: POST /api/demo/scoring/run</text>
+      <text x="101" y="178" font-size="6.7px" fill="#334155">&bull; Pydantic schema validation &amp; strict error handling</text>
+      <text x="101" y="189" font-size="6.7px" fill="#334155">&bull; Secure server-side credential isolation (zero browser keys)</text>
+
+      <!-- Arrow L2 -> L3 (POST /api/demo/scoring/run) -->
+      <path d="M 310 92 L 310 104 L 180 104 L 180 125" fill="none" stroke="#475569" stroke-width="1.3" marker-end="url(#arrSlate)" />
+      <rect x="185" y="98" width="175" height="12" rx="3" fill="#ffffff" stroke="#94a3b8" stroke-width="0.8" />
+      <text x="188" y="107" font-size="6.2px" font-weight="700" fill="#0f172a">HTTP POST /api/demo/scoring/run (Shortlist batches)</text>
+
+      <!-- Layer 4 Card -->
+      <rect x="440" y="130" width="308" height="73" rx="4" fill="#ffffff" stroke="#d8b4fe" stroke-width="1.2" />
+      <rect x="440" y="130" width="308" height="17" rx="4" fill="#faf5ff" />
+      <text x="446" y="142" font-size="7.6px" font-weight="700" fill="#6b21a8">LAYER 4 &mdash; AI SCORING</text>
+      <text x="742" y="142" font-size="6.3px" font-weight="600" fill="#7c3aed" text-anchor="end">Google Gemini (gemini-3.1-flash-lite)</text>
+      <text x="446" y="156" font-size="6.7px" fill="#334155">&bull; Evaluates 70 shortlisted candidates in 7 parallel batches</text>
+      <text x="446" y="167" font-size="6.7px" fill="#334155">&bull; Hook Potency (0&ndash;100) &bull; Cliffhanger Unresolvedness (0&ndash;100)</text>
+      <text x="446" y="178" font-size="6.7px" fill="#334155">&bull; Standalone Clarity (0&ndash;100) &amp; Evidence-Grounded Rationales</text>
+      <text x="446" y="189" font-size="6.7px" fill="#334155">&bull; Strict JSON Schema output; ZERO clock arithmetic duty</text>
+
+      <!-- Arrow L3 -> L4 (Scoring Dispatch) -->
+      <line x1="375" y1="156" x2="434" y2="156" stroke="#7c3aed" stroke-width="1.3" marker-end="url(#arrPurple)" />
+      <rect x="378" y="149" width="56" height="11" rx="2" fill="#faf5ff" stroke="#d8b4fe" stroke-width="0.8" />
+      <text x="380" y="157" font-size="6.0px" font-weight="700" fill="#6b21a8">Model Dispatch</text>
+
+      <!-- Arrow L4 -> L3 (Schema Response) -->
+      <line x1="440" y1="174" x2="381" y2="174" stroke="#0d9488" stroke-width="1.3" marker-end="url(#arrTeal)" />
+      <rect x="382" y="167" width="52" height="11" rx="2" fill="#f0fdfa" stroke="#5eead4" stroke-width="0.8" />
+      <text x="384" y="175" font-size="6.0px" font-weight="700" fill="#0f766e">JSON Scores</text>
+
+      <!-- Arrow L3 -> L5 (Return through FastAPI to Frontend Workspace) -->
+      <path d="M 365 130 L 365 112 L 637 112 L 637 97" fill="none" stroke="#059669" stroke-width="1.3" marker-end="url(#arrGreen)" />
+      <rect x="430" y="106" width="180" height="12" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="0.8" />
+      <text x="434" y="115" font-size="6.2px" font-weight="700" fill="#065f46">Structured JSON Response (Scores &amp; Rationale)</text>
+    </svg>
   </div>
-  <p><strong>Division of Labor:</strong> Code handles everything arithmetic. LLMs must never perform clock math or window subtraction. AI interprets narrative meaning, irony, emotional stakes, and curiosity gaps where regexes fail.</p>
+
+  <div style="background:#eff6ff; border-left:3.5px solid #2563eb; padding:3px 7px; font-size:7.2pt; margin:3px 0 4px 0; border-radius:0 4px 4px 0; color:#1e3a8a;">
+    <strong>Design principle:</strong> deterministic code owns correctness, AI evaluates narrative meaning, and editors retain creative control.
+  </div>
+
+  <div class="grid-2" style="gap:5px; margin-bottom:4px; font-size:6.9pt;">
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:3px; padding:2.5px 5px;">
+      <strong>Browser / TypeScript:</strong> Owns integer-ms timing, boundary validation (&lt;0.1s), candidate generation, shortlist filtering, and NLE export encoding.
+    </div>
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:3px; padding:2.5px 5px;">
+      <strong>FastAPI Backend:</strong> Owns <code>/api/*</code> routing, Pydantic schema validation, secure credential isolation (zero browser keys), and error handling.
+    </div>
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:3px; padding:2.5px 5px;">
+      <strong>Google Gemini (Flash Lite):</strong> Owns semantic narrative scoring (hook potency, cliffhanger urgency, standalone clarity) &mdash; zero arithmetic duty.
+    </div>
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:3px; padding:2.5px 5px;">
+      <strong>Human Editor:</strong> Owns final creative oversight, AI disagreement audits, line-boundary trim nudging, and production publish approvals.
+    </div>
+  </div>
 
   <h2>3. Scale, Performance & Cost Breakdown (50-Episode Run)</h2>
   <p>All metrics were produced by automated scripts (<code>scripts/audit_frontend_parser.mjs</code> and <code>outputs/run-2026-11-21T06-35-55-637Z/run_log.json</code>) evaluating all 50 episodes (3,727 events):</p>
@@ -269,7 +374,7 @@
     <h1>PromoForge: Quality Evaluation, Failures & Roadmap</h1>
     <div class="meta">
       <span><strong>Independent Benchmark, Failure Retrospective & Production Integration</strong></span>
-      <span><strong>Commit:</strong> a236aa1</span>
+      <span><strong>Commit:</strong> 3a225ec</span>
       <span><strong>Production URL:</strong> <a href="https://promoforge.vercel.app">https://promoforge.vercel.app</a></span>
     </div>
   </div>

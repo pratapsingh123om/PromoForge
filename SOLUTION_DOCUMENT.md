@@ -5,62 +5,89 @@
 
 ---
 
-## 1. Problem Framing & Assumptions
+## 1. Problem Choice & Operational Framing
 
-### The Core Challenge
-Vertical short-form drama platforms (TikTok, Reels, Shorts) live or die on subscriber acquisition. Finding promotional moments across 50 full-length episodes (~3,700 script events) is manually prohibitive and editorial quality is unforgiving. Naive AI windowing or brute-force LLM video slicing fails in production because:
-1. **Dialogue Slicing:** Naive millisecond cuts slice across active spoken dialogue lines, disrupting speech.
-2. **Context Collapse:** Scenes featuring pronouns ("He did it", "Take her away") without visual context baffle first-time viewers.
-3. **Spoiler & Mystery Bleed:** Promos that accidentally answer their own cliffhanger within the same window or in a subsequent cut kill binge desire.
-4. **Late-Series Narrative Spoilers:** Late episodes (e.g., episodes 41–50 of 50) frequently expose climactic resolutions that ruin early-series acquisition.
+### Why Problem 1 (Find the Promos)?
+I chose **Problem 1 (Find the Promos)** because discovering high-converting promotional cut points is the single most urgent operational bottleneck in vertical drama streaming. While other challenges drift toward speculative end-to-end video synthesis, promo selection is an immediate, business-critical editorial workflow with clear evaluation criteria:
 
-### Key Working Assumptions
-- **Platform Invariants:** Valid promo duration is strictly between 20.0s and 60.0s. Hook occurs within the first 3.0s. Every promo ends on an unresolved curiosity gap or cliffhanger.
-- **Editorial Grounding:** The editor must be in control. AI proposes, ranks, and annotates; deterministic code validates timestamps and boundary safety; human editors review, approve, or adjust.
-- **Data Confidentiality:** Proprietary screenplay text and intellectual property must never be committed to public repositories or leaked into training corpora.
+1. **Immediate Operational Bottleneck:** Editing teams manually comb through hours of episodic drama to find 30–60s acquisition hooks for TikTok, Reels, and YouTube Shorts under weekly release deadlines.
+2. **Directly Measurable Business Impact:** Top-of-funnel promo retention and click-through directly drive initial coin unlocks and subscriber acquisition curves.
+3. **Realistic Series-Scale Verifiability:** The 50 supplied episodes (~3,727 events) permit rigorous full-series stress testing against real-world production scale rather than isolated toy demos.
+4. **Clean Division of Labor:** High-precision deterministic code guarantees timing invariants and boundary physics, while AI evaluates narrative tension, dramatic pacing, and curiosity gaps.
+5. **Scoped for Editorial Utility:** Focuses on solving candidate discovery and NLE cut-sheet generation rather than ungrounded "virality" hype or synthetic video hallucinations.
+
+### Hard Editorial Invariants & Operating Boundaries
+- **Duration Bounds:** Strictly bounded to 20.0s – 60.0s total runtime.
+- **Dialogue Boundary Validation:** Zero cuts inside spoken lines (<0.1s tolerance against script event clocks; text-only boundary check).
+- **Curiosity Hook & Cliffhanger:** Opening hook in first 3.0s; ends on maximum unresolved curiosity/tension without answering its own premise.
+- **Confidentiality Guarantee:** Zero proprietary screenplay dialogue committed to public git or leaked to public models.
+- **Human-in-the-Loop Workflow:** AI proposes, ranks, and annotates; editors retain final review, boundary trimming, and NLE export control.
 
 ---
 
-## 2. System Architecture: Code vs. AI Boundary
+## 2. System Architecture: Five-Layer Runtime & Division of Labor
 
-PromoForge separates deterministic mechanics from semantic interpretation:
+PromoForge enforces a strict five-layer runtime architecture that separates deterministic time-boundary mechanics from semantic narrative interpretation:
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        DETERMINISTIC CODE ENGINE                       │
-│  • Millisecond Parsing (mm:ss.ff -> ms)                                │
-│  • Timestamped Dialogue-Boundary Validation (0.1s safety check)        │
-│  • Duration Invariants [20.0s, 60.0s]                                  │
-│  • Overlap & Duplicate Suppression (>= 4.0s or > 15% overlap)          │
-│  • Continuation Suppression (No promo answers another promo's query)   │
-│  • Proportional Series Adjustment (+5 first 30%, -6 last 20%)          │
-└─────────────────────────────────┬──────────────────────────────────────┘
-                                  │ 146 Stratified Clean Candidates
-                                  │ (153 in initial baseline)
-                                  ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                          AI SEMANTIC EVALUATOR                         │
-│  • Structured JSON Output (Strict Schema Validation)                   │
-│  • Shortlist Bounded: 70 candidates scored in 7 batches of 10          │
-│  • Hook Potency (0-100) & Emotional Shock Value                        │
-│  • Cliffhanger Unresolvedness (0-100)                                   │
-│  • Standalone Clarity (0-100) & Pronoun Ambiguity Audit                │
-│  • Model Providers: Gemini gemini-3.1-flash-lite / OpenAI / No-API     │
-└─────────────────────────────────┬──────────────────────────────────────┘
-                                  │ Reconciled Editorial Scores
-                                  ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                      HUMAN EDITORIAL WORKSPACE                         │
-│  • "Context Review Needed" Badges for AI vs Heuristic Disagreements    │
-│  • Boundary Nudging on Real Dialogue Events                            │
-│  • Approval State Tracking (user_approved / user_rejected / pending)   │
-│  • Multi-Format Exports: EDL, CSV Cut Sheets, OTIO, JSON Master        │
-└────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ BROWSER RUNTIME • TypeScript / React 19 / Vite (Deployed on Vercel)                    │
+│                                                                                        │
+│  ┌─────────────────────────┐  Events   ┌───────────────────────────┐                   │
+│  │ LAYER 1: FRONTEND UI    │──────────▶│ LAYER 2: DETERMINISTIC    │                   │
+│  │ • React 19, TS, Vite    │           │ • screenplayEngine.ts     │                   │
+│  │ • 50-Ep Intake & Upload │           │ • Integer-ms clock math   │                   │
+│  │ • Real-time progress    │           │ • [20s, 60s] window gen   │                   │
+│  │ • State orchestration   │           │ • Dialogue check (<0.1s)  │                   │
+│  └─────────────────────────┘           │ • Overlap & de-dup filter │                   │
+│                                        │ • 146 pool ──▶ 70 model   │                   │
+│                                        └─────────────┬─────────────┘                   │
+│                                                      │                                 │
+│  ┌───────────────────────────────────────────────────┼──────────────────────────────┐  │
+│  │ LAYER 5: EDITORIAL REVIEW WORKSPACE               │                              │  │
+│  │ • Matches JSON scores by candidate ID             │                              │  │
+│  │ • Deterministic series adjustments (+5 early, -6 late)                           │  │
+│  │ • "Context Review Needed" AI-heuristic disagreement flags                        │  │
+│  │ • Human review: Approve / Reject / Dialogue boundary nudge                       │  │
+│  │ • Multi-format NLE export: CMX 3600 EDL, OpenTimelineIO (OTIO), CSV, JSON        │  │
+│  └───────────────────────────────────────────────────┼──────────────────────────────┘  │
+└──────────────────────────────────────────────────────┼─────────────────────────────────┘
+                                                       │
+                           HTTP POST /api/demo/scoring/run (Shortlist batches)
+                                                       │
+                                                       ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ SERVERLESS BACKEND & CLOUD AI • Python FastAPI / Google Gemini API                     │
+│                                                                                        │
+│  ┌──────────────────────────────┐  Batch Dispatch   ┌───────────────────────────────┐  │
+│  │ LAYER 3: BACKEND API SERVICE │──────────────────▶│ LAYER 4: AI SCORING           │  │
+│  │ • FastAPI • Python 3.12      │                   │ • gemini-3.1-flash-lite       │  │
+│  │ • Vercel rewrite: /api/*     │◀──────────────────│ • 70 cands in 7 batches       │  │
+│  │ • POST /api/demo/scoring/run │   JSON Scores     │ • Hook Potency (0-100)        │  │
+│  │ • Pydantic schema validation │                   │ • Cliffhanger Urgency (0-100) │  │
+│  │ • Secure credential injection│                   │ • Standalone Clarity (0-100)  │  │
+│  │ • Error handling & dispatch  │                   │ • ZERO clock arithmetic       │  │
+│  └──────────────┬───────────────┘                   └───────────────────────────────┘  │
+│                 │                                                                      │
+│                 └───────────────────────────────────┐                                  │
+└─────────────────────────────────────────────────────┼──────────────────────────────────┘
+                                                      │
+                       Structured JSON Response (Returned through FastAPI)
+                                                      │
+                                                      ▼
+                                       (To Layer 5 Editorial Workspace)
 ```
 
-### Why This Boundary?
-- **Code Handles:** Everything measurable by arithmetic. A language model must never do timestamp subtraction or duplicate suppression; LLMs hallucinate clock arithmetic.
-- **AI Handles:** Narrative tension, emotional subtext, irony, and curiosity gaps. A regex cannot judge whether a reveal creates viral suspense or dull dialogue.
+> **Design principle:** deterministic code owns correctness, AI evaluates narrative meaning, and editors retain creative control.
+
+### Clear Division of Responsibilities
+
+| Subsystem | Owner Technology | Core Responsibilities (What It Owns) | What It Must NEVER Do |
+| :--- | :--- | :--- | :--- |
+| **Browser / Client Engine** | TypeScript 5.7 / `screenplayEngine.ts` | Integer-ms timing calculations, boundary validation (<0.1s tolerance), candidate window generation [20s, 60s], overlap suppression (≥4.0s or >15%), continuation de-duplication, shortlist stratification (146 pool → 70 model), NLE export formatting (EDL, OTIO). | Never evaluate narrative subtext, emotional tension, or pronoun ambiguity. |
+| **Backend API** | FastAPI / Python 3.12 (Vercel `/api/*`) | HTTP routing via `vercel.json`, Pydantic request/response schema validation, server-side API credential isolation, provider dispatch, batch orchestration, rate limit handling. | Never expose raw Gemini API keys to the browser; never perform client UI rendering. |
+| **AI Semantic Evaluator** | Google Gemini (`gemini-3.1-flash-lite`) | Narrative Hook Potency (0–100), Cliffhanger Unresolvedness & Urgency (0–100), Standalone Clarity & Context Audit (0–100), evidence-grounded rationale generation. | **Zero arithmetic responsibility:** Never calculate durations, subtract timestamps, or filter overlaps. |
+| **Human Editor** | Editorial Review Workspace (React 19) | Final creative judgment, reviewing "Context Review Needed" AI-heuristic disagreement flags, line-boundary trim nudging on real dialogue events, Approve/Reject review, NLE export trigger. | Never bypassed by full-autonomous publishing; retains 100% final editorial authority. |
 
 ---
 
