@@ -42,31 +42,39 @@ The following assumptions are implemented directly in `src/services/screenplayEn
 
 ---
 
-## 4. Scale and Cost (Final Run)
+## 4. Scale and Cost (Verified Gemini Run: `run-2026-11-21T06-35-55-637Z`)
 
-All numbers below come directly from `outputs/final_run.zip` (`exports/run_log.json`) and the executed `scripts/audit_frontend_parser.mjs` test output:
+All metrics below come directly from `outputs/final_run.zip` (`run_log.json` and `raw/model_response_batch_*.json`):
 
-- **Episodes evaluated:** 50 (`file_count: 50` in `scripts/audit_frontend_parser.mjs`)
-- **Total screenplay events:** 3,727 (`total_events: 3727` in `scripts/audit_frontend_parser.mjs`)
-- **Raw candidate windows generated:** 19,046 (`raw_windows_examined: 19046` in `scripts/audit_frontend_parser.mjs`)
-- **Rejected by rule:**
-  - Duration out of bounds (<20s or >60s): 7,167 (`rejected_duration: 7167`)
-  - Dialogue-slice boundary cuts: 996 (`rejected_dialogue_slice: 996`)
-  - Sentence fragments: 165 (`rejected_fragment: 165`)
-  - Mid-speech continue turns: 352 (`rejected_mid_speech: 352`)
-  - Overlap de-duplication (>20% overlap): 9,599 (`suppressed_overlap: 9599`)
-  - Cliffhanger reply continuation suppression: 1,131 (`suppressed_cliffhanger_continuation: 1131`)
-- **Candidates accepted into shortlist:** 153 (`episode_shortlist_count: 153`)
-- **Model calls:** 0 (`model_call_count: 0` in `exports/run_log.json`)
-- **Candidates scored by model:** 0 (offline rule scoring utilized in final export run; `model_call_count: 0`)
-- **Input tokens:** 0 ("free tier; cost not measured") (`exports/run_log.json`)
-- **Output tokens:** 0 ("free tier; cost not measured") (`exports/run_log.json`)
-- **Wall time:** 1.67 seconds (`wall_time_seconds: 1.67` in `exports/run_log.json`)
-- **Model name:** `RuleBasedNarrativeProvider (swappable)` (`model` in `exports/run_log.json`)
-- **Estimated API cost:** 0.0 ("free tier; cost not measured") (`estimated_token_cost: 0.0` in `exports/run_log.json`)
+- **Run ID:** `run-2026-11-21T06-35-55-637Z`
+- **Model Name:** `gemini-3.1-flash-lite` (`model.model` in `run_log.json`)
+- **Episodes Evaluated:** 50
+- **Total Screenplay Events:** 3,727
+- **Raw Candidate Windows Examined:** 19,046
+- **Independent Filtering & Suppression Counters:**
+  - `rejected_duration`: 7,167
+  - `rejected_dialogue_slice`: 996
+  - `rejected_fragment` (start events): 165
+  - `rejected_mid_speech` (start events): 352
+  - `suppressed_overlap`: 9,985
+  - `suppressed_cliffhanger_continuation`: 744
+- **Episode Shortlist Candidates:** 153 clean candidates across 50 episodes (min 1, max 5 per episode; `src/App.tsx:553`)
+- **Candidates Scored by Gemini:** 70 (`model_candidates_scored: 70`, capped by `SERIES_MODEL_CANDIDATES = 70` in `demoRun.ts`)
+- **Model Calls:** 7 batches (`model_calls: 7`, 10 candidates per batch)
+- **Input Tokens:** 45,558 (`input_tokens: 45558`)
+- **Output Tokens:** 10,278 (`output_tokens: 10278`)
+- **Wall Time:** 67.87 seconds (`wall_time_seconds: 67.87`)
+- **Stage Timings:**
+  - Parse: 206 ms
+  - Candidates: 15,107 ms
+  - Score (Gemini API calls): 52,266 ms
+  - Checks & De-conflict: 128 ms
+  - Rank & Export: 155 ms
+- **Estimated API Cost:** $0.00 ("free tier; cost not measured")
+- **Final Series Promos Selected:** 25 ranked promos across 22 episodes (`promos.json`)
 
 **Derivation for a new show per week:**  
-At 50 episodes per show, examining ~19,000 raw windows and shortlisting ~150 candidates, sending the top 12 bounded candidates to Gemini Flash Lite costs less than $0.01 per show in tokens, completing candidate discovery in under 5 seconds.
+At 50 episodes per show, scoring a fixed shortlist of 70 candidates consumes ~45.5k input tokens and ~10.3k output tokens across 7 Gemini Flash Lite calls. Under Google Gemini public pricing ($0.075 / 1M input, $0.30 / 1M output), the marginal API cost is **$0.0065 per show** (~0.65 cents) with a wall-clock execution time of under 70 seconds.
 
 ---
 
