@@ -44,7 +44,7 @@ The following assumptions are implemented directly in `src/services/screenplayEn
 
 ## 4. Scale and Cost (Verified Gemini Run: `run-2026-11-21T06-35-55-637Z`)
 
-All metrics below come directly from `outputs/final_run.zip` (`run_log.json` and `raw/model_response_batch_*.json`):
+All metrics below come directly from `outputs/final_run.zip` (`run_log.json` and `raw/model_response_batch_*.json`; raw response folder shared privately, contains short script excerpts):
 
 - **Run ID:** `run-2026-11-21T06-35-55-637Z`
 - **Model Name:** `gemini-3.1-flash-lite` (`model.model` in `run_log.json`)

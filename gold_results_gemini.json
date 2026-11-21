@@ -1,0 +1,104 @@
+{
+  "status": "Evaluated on Gemini Run (run-2026-11-21T06-35-55-637Z)",
+  "labeller": "Claude (single LLM reference, screenplay text only; not human editor ground truth)",
+  "caveat": "Gemini scored a fixed shortlist of 70 candidates across 50 episodes (~1.4 per episode). Target episodes 24 and 41 had only 1 candidate shortlisted for model scoring, compared to 2-3 in per-episode mode.",
+  "sample_size": "6 episodes, 6 labelled windows",
+  "hits_lenient_shorter": 2,
+  "hit_rate_lenient_percent": 33.3,
+  "hits_strict_iou": 1,
+  "hit_rate_strict_iou_percent": 16.7,
+  "negative_controls": {
+    "episodes": [
+      "EP_006",
+      "EP_014",
+      "EP_017"
+    ],
+    "result": "All 3 quiet romance episodes successfully excluded from top 25 series promos. EP_014 was filtered pre-model (0 candidates in 70 shortlist); EP_006 and EP_017 received low cliffhanger scores (60 and 55) from Gemini and were rejected."
+  },
+  "details": [
+    {
+      "episode": "EP_024",
+      "window_index": 1,
+      "claude_window": [
+        22.5,
+        48
+      ],
+      "model_candidates_available": 1,
+      "matched_candidate_id": "EP_024_P_EP_024_E023_EP_024_E054",
+      "overlap_over_shorter": 0.667,
+      "intersection_over_union": 0.354,
+      "hit_lenient_shorter": true,
+      "hit_strict_iou": false
+    },
+    {
+      "episode": "EP_024",
+      "window_index": 2,
+      "claude_window": [
+        6.8,
+        32.5
+      ],
+      "model_candidates_available": 1,
+      "matched_candidate_id": "EP_024_P_EP_024_E023_EP_024_E054",
+      "overlap_over_shorter": 0.058,
+      "intersection_over_union": 0.024,
+      "hit_lenient_shorter": false,
+      "hit_strict_iou": false
+    },
+    {
+      "episode": "EP_041",
+      "window_index": 1,
+      "claude_window": [
+        58,
+        84
+      ],
+      "model_candidates_available": 1,
+      "matched_candidate_id": "EP_041_P_EP_041_E026_EP_041_E045",
+      "overlap_over_shorter": 0.096,
+      "intersection_over_union": 0.048,
+      "hit_lenient_shorter": false,
+      "hit_strict_iou": false
+    },
+    {
+      "episode": "EP_041",
+      "window_index": 2,
+      "claude_window": [
+        1.8,
+        28.4
+      ],
+      "model_candidates_available": 1,
+      "matched_candidate_id": null,
+      "overlap_over_shorter": 0,
+      "intersection_over_union": 0,
+      "hit_lenient_shorter": false,
+      "hit_strict_iou": false
+    },
+    {
+      "episode": "EP_047",
+      "window_index": 1,
+      "claude_window": [
+        56.8,
+        101
+      ],
+      "model_candidates_available": 2,
+      "matched_candidate_id": "EP_047_P_EP_047_E027_EP_047_E051",
+      "overlap_over_shorter": 1,
+      "intersection_over_union": 0.95,
+      "hit_lenient_shorter": true,
+      "hit_strict_iou": true
+    },
+    {
+      "episode": "EP_047",
+      "window_index": 2,
+      "claude_window": [
+        1.8,
+        30.3
+      ],
+      "model_candidates_available": 2,
+      "matched_candidate_id": "EP_047_P_EP_047_E012_EP_047_E027",
+      "overlap_over_shorter": 0.242,
+      "intersection_over_union": 0.119,
+      "hit_lenient_shorter": false,
+      "hit_strict_iou": false
+    }
+  ]
+}
