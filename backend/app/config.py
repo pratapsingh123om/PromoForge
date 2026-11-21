@@ -11,7 +11,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATABASE_URL = f"sqlite:///{(REPOSITORY_ROOT / 'data' / 'promoforge.db').as_posix()}"
+DEFAULT_DATABASE_PATH = (
+    Path("/tmp/promoforge.db")
+    if os.getenv("VERCEL")
+    else REPOSITORY_ROOT / "data" / "promoforge.db"
+)
+DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
 
 
 @dataclass(frozen=True, slots=True)

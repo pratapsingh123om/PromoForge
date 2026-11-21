@@ -17,6 +17,8 @@ export interface ParsedEvent {
 }
 
 export interface ParsedEpisode {
+  source_name: string;
+  language: string;
   episode_id: string;
   episode_number: number;
   logline: string;
@@ -24,8 +26,28 @@ export interface ParsedEpisode {
   duration_ms: number;
   events: ParsedEvent[];
   last_timestamp: string;
+  declared_end_timestamp: string;
   unresolved_aliases: string[];
+  alias_analysis_available: boolean;
   warnings: string[];
+}
+
+export interface ParseFailure {
+  source_name: string;
+  message: string;
+  line_number: number | null;
+}
+
+export class ScreenplayParseError extends Error {
+  readonly sourceName: string;
+  readonly lineNumber: number | null;
+
+  constructor(message: string, sourceName: string, lineNumber: number | null = null) {
+    super(message);
+    this.name = "ScreenplayParseError";
+    this.sourceName = sourceName;
+    this.lineNumber = lineNumber;
+  }
 }
 
 export interface PromoCutSegment {
@@ -61,9 +83,11 @@ export interface PromoCandidateItem {
   };
   hard_checks_passed: string[];
   quality_flags: string[];
+  score_source: string;
   status: "approved" | "rejected" | "selected" | "review";
   rejection_reason?: string;
   transcript_lines: {
+    event_type: ParsedEvent["type"];
     speaker: string | null;
     text: string;
     start_clock: string;
@@ -86,6 +110,11 @@ export interface RunCheckSummary {
   wall_time_seconds: number;
 }
 
+export interface PromoAdjustmentResult {
+  promo: PromoCandidateItem | null;
+  errors: string[];
+}
+
 export function clock(ms: number): string {
   const totalSeconds = ms / 1000;
   const minutes = Math.floor(totalSeconds / 60);
@@ -94,29 +123,56 @@ export function clock(ms: number): string {
 }
 
 export function parseClockToMs(timecode: string): number {
-  const parts = timecode.trim().split(":");
-  if (parts.length === 2) {
-    const mins = parseInt(parts[0], 10);
-    const secs = parseFloat(parts[1]);
-    return Math.round((mins * 60 + secs) * 1000);
-  }
-  return 0;
+  const match = /^(\d+):(\d{2})(?:\.(\d{1,3}))?$/.exec(timecode.trim());
+  if (!match) throw new Error(`Invalid timestamp: ${timecode}`);
+  const minutes = Number(match[1]);
+  const seconds = Number(match[2]);
+  if (seconds >= 60) throw new Error(`Invalid timestamp seconds: ${timecode}`);
+  const fraction = (match[3] || "").padEnd(3, "0");
+  return minutes * 60_000 + seconds * 1000 + Number(fraction || 0);
 }
 
-export function parseScreenplayText(sourceText: string, filename: string = "episode.txt"): ParsedEpisode {
+export function parseScreenplayText(
+  sourceText: string,
+  filename: string = "episode.txt",
+  language: string = "en",
+): ParsedEpisode {
   const lines = sourceText.split(/\r?\n/);
-  let episodeNumber = 1;
-  let logline = "No logline declared";
-  let continuityNotes = "None";
+  const requiredHeader = (label: string) => {
+    const index = lines.findIndex((line) => line.trim().toUpperCase().startsWith(`${label}:`));
+    if (index < 0) {
+      throw new ScreenplayParseError(`Missing required header: ${label}`, filename, 1);
+    }
+    const value = lines[index].trim().slice(label.length + 1).trim();
+    if (!value) {
+      throw new ScreenplayParseError(`Empty required header: ${label}`, filename, index + 1);
+    }
+    return { value, line: index + 1 };
+  };
+
+  const episodeHeader = requiredHeader("EPISODE NUMBER");
+  const episodeMatch = /^(?:Episode\s+)?(\d+)$/i.exec(episodeHeader.value);
+  if (!episodeMatch) {
+    throw new ScreenplayParseError("Invalid EPISODE NUMBER header", filename, episodeHeader.line);
+  }
+  const episodeNumber = Number(episodeMatch[1]);
+  const logline = requiredHeader("EPISODE LOGLINE").value;
+  const continuityNotes = requiredHeader("CONTINUITY NOTES").value;
   const warnings: string[] = [];
 
-  for (const line of lines) {
-    const epMatch = line.match(/^EPISODE NUMBER:\s*(?:Episode\s+)?(\d+)/i);
-    if (epMatch) episodeNumber = parseInt(epMatch[1], 10);
-    const logMatch = line.match(/^EPISODE LOGLINE:\s*(.+)$/i);
-    if (logMatch) logline = logMatch[1].trim();
-    const contMatch = line.match(/^CONTINUITY NOTES:\s*(.+)$/i);
-    if (contMatch) continuityNotes = contMatch[1].trim();
+  const scriptStart = lines.findIndex((line) => line.trim() === "--- SCRIPT START ---");
+  const scriptEnd = lines.findIndex((line) => line.trim() === "--- SCRIPT END ---");
+  if (scriptStart < 0) {
+    throw new ScreenplayParseError("Missing --- SCRIPT START --- marker", filename, 1);
+  }
+  if (scriptEnd < 0 || scriptEnd <= scriptStart) {
+    throw new ScreenplayParseError("Missing or misplaced --- SCRIPT END --- marker", filename, Math.max(1, lines.length));
+  }
+  const sceneLines = lines
+    .map((line, index) => ({ line: line.trim(), index }))
+    .filter((item) => item.index > scriptStart && item.index < scriptEnd && /^SCENE\s+\d+$/i.test(item.line));
+  if (!sceneLines.length) {
+    throw new ScreenplayParseError("No SCENE blocks found", filename, scriptStart + 2);
   }
 
   const episodeId = `EP_${episodeNumber.toString().padStart(3, "0")}`;
@@ -126,7 +182,7 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
 
   // Extract aliases from continuity notes
   const aliasMap: Record<string, string> = {};
-  const isRegex = /([A-Za-z0-9\s'_-]+?)\s+(?:is|=|represents)\s+([A-Za-z0-9\s'_-]+)/gi;
+  const isRegex = /([A-Za-z][A-Za-z0-9\s'_-]{1,60}?)\s+(?:is|=|represents|aka)\s+([A-Za-z][A-Za-z0-9\s'_-]{1,60})/gi;
   let m: RegExpExecArray | null;
   while ((m = isRegex.exec(continuityNotes)) !== null) {
     const alias = m[1].trim().toLowerCase();
@@ -136,8 +192,25 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
     }
   }
 
-  let i = 0;
-  while (i < lines.length) {
+  const declaredSceneEnds: number[] = [];
+  for (const item of lines) {
+    const match = /^Scene end:\s*\(?(\d+:\d{2}(?:\.\d{1,3})?)\)?$/i.exec(item.trim());
+    if (match) declaredSceneEnds.push(parseClockToMs(match[1]));
+  }
+  if (!declaredSceneEnds.length) {
+    throw new ScreenplayParseError("No valid Scene end timestamps found", filename, sceneLines[0].index + 1);
+  }
+
+  const parseBlockLabel = (value: string): string | null => {
+    const trimmed = value.trim();
+    const bold = /^\*\*([^*\r\n]+):\*\*$/.exec(trimmed);
+    if (bold) return bold[1].trim();
+    const plain = /^(CAMERA|ACTION|SOUND(?: FX)?|MUSIC|[A-Z][A-Z0-9 .'-]{1,}(?:\s+\([^)]*\))?)$/.exec(trimmed);
+    return plain ? plain[1].trim() : null;
+  };
+
+  let i = scriptStart + 1;
+  while (i < scriptEnd) {
     const line = lines[i].trim();
     const sceneMatch = line.match(/^SCENE\s+(\d+)/i);
     if (sceneMatch) {
@@ -147,9 +220,8 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
     }
 
     // Block header e.g. **JULIAN VANCE (cold):** or JULIAN VANCE (cold) or CAMERA or ACTION or SOUND FX
-    const blockMatch = line.match(/^(?:\*\*)?([A-Za-z0-9 _'()\-]+?)(?:\*\*)?:?$/);
-    if (blockMatch) {
-      const rawLabel = blockMatch[1].trim();
+    const rawLabel = parseBlockLabel(line);
+    if (rawLabel) {
       const upper = rawLabel.toUpperCase();
       let type: "dialogue" | "action" | "camera" | "sound" = "dialogue";
       let speaker: string | null = null;
@@ -159,7 +231,7 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
       else if (upper.includes("SOUND") || upper.includes("MUSIC")) type = "sound";
       else {
         type = "dialogue";
-        // Extract speaker from label e.g. JULIANA (shocked) -> Juliana
+        // Extract speaker from a label such as MARA (shocked) -> Mara.
         const spkMatch = rawLabel.match(/^([^()]+)/);
         speaker = spkMatch ? spkMatch[1].trim() : rawLabel;
         const spkLower = speaker.toLowerCase();
@@ -171,17 +243,29 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
       // Look ahead for Start: (mm:ss.ff) | End: (mm:ss.ff)
       let timeMatch: RegExpMatchArray | null = null;
       let j = i + 1;
-      while (j < lines.length && j <= i + 3 && !timeMatch) {
+      while (j < scriptEnd && j <= i + 3 && !timeMatch) {
         timeMatch = lines[j].match(/Start:\s*\(([0-9:.]+)\)\s*\|\s*End:\s*\(([0-9:.]+)\)/i);
         if (timeMatch) break;
         j++;
       }
 
+      if (!timeMatch) {
+        throw new ScreenplayParseError("Missing or invalid timing after block header", filename, i + 1);
+      }
       if (timeMatch) {
         const startClock = timeMatch[1];
         const endClock = timeMatch[2];
-        const startMs = parseClockToMs(startClock);
-        const endMs = parseClockToMs(endClock);
+        let startMs: number;
+        let endMs: number;
+        try {
+          startMs = parseClockToMs(startClock);
+          endMs = parseClockToMs(endClock);
+        } catch (error) {
+          throw new ScreenplayParseError(error instanceof Error ? error.message : "Invalid timestamp", filename, j + 1);
+        }
+        if (endMs <= startMs) {
+          throw new ScreenplayParseError("Block end must be after block start", filename, j + 1);
+        }
 
         // Content lines until next block or script end
         const contentLines: string[] = [];
@@ -192,7 +276,7 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
             k++;
             continue;
           }
-          if (cLine === "--- SCRIPT END ---" || cLine.startsWith("SCENE ") || cLine.match(/^(?:\*\*)?[A-Z0-9 _'()\-]+(?:\*\*)?:?$/) && lines[k + 1]?.includes("Start:")) {
+          if (cLine === "--- SCRIPT END ---" || /^SCENE\s+\d+$/i.test(cLine) || parseBlockLabel(cLine)) {
             break;
           }
           contentLines.push(cLine);
@@ -200,8 +284,10 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
         }
 
         const text = contentLines.join(" ");
-        if (text) {
-          events.push({
+        if (!text) {
+          throw new ScreenplayParseError("Timed block has no content", filename, j + 1);
+        }
+        events.push({
             event_id: `${episodeId}_E${eventIdx.toString().padStart(3, "0")}`,
             type,
             speaker,
@@ -212,13 +298,16 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
             end_clock: endClock,
             scene_id: currentScene,
           });
-          eventIdx++;
-        }
+        eventIdx++;
         i = k;
         continue;
       }
     }
     i++;
+  }
+
+  if (!events.length) {
+    throw new ScreenplayParseError("No timed screenplay events were parsed", filename, scriptStart + 2);
   }
 
   // Find unresolved descriptive speaker labels
@@ -227,15 +316,27 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
   const descriptiveWords = ["former", "lady", "man", "woman", "guy", "stranger", "in", "gown", "suit"];
   for (const spk of allSpeakers) {
     const lower = spk.toLowerCase();
-    if (descriptiveWords.some((w) => lower.includes(w)) && !aliasMap[lower]) {
+    if (
+      language === "en" &&
+      descriptiveWords.some((word) => new RegExp(`\\b${word}\\b`, "i").test(lower)) &&
+      !aliasMap[lower]
+    ) {
       unresolved.push(spk);
     }
   }
 
-  const durationMs = events.length > 0 ? Math.max(...events.map((e) => e.end_ms)) : 0;
-  const lastTimestamp = events.length > 0 ? clock(durationMs) : "00:00.00";
+  const lastEventMs = Math.max(...events.map((event) => event.end_ms));
+  const declaredEndMs = Math.max(...declaredSceneEnds);
+  const durationMs = Math.max(lastEventMs, declaredEndMs);
+  const lastTimestamp = clock(lastEventMs);
+  const declaredEndTimestamp = clock(declaredEndMs);
+  if (!events.some((event) => event.type === "dialogue" || event.type === "action")) {
+    warnings.push("No dialogue or action events are available as scoring evidence.");
+  }
 
   return {
+    source_name: filename,
+    language,
     episode_id: episodeId,
     episode_number: episodeNumber,
     logline,
@@ -243,7 +344,9 @@ export function parseScreenplayText(sourceText: string, filename: string = "epis
     duration_ms: durationMs,
     events,
     last_timestamp: lastTimestamp,
+    declared_end_timestamp: declaredEndTimestamp,
     unresolved_aliases: unresolved,
+    alias_analysis_available: language === "en",
     warnings,
   };
 }
@@ -259,6 +362,164 @@ export function isSentenceFragment(text: string): boolean {
     "yet", "nor", "though", "although", "while", "whereas",
   ]);
   return conjunctions.has(firstWord);
+}
+
+function scoreWindow(
+  startEv: ParsedEvent,
+  endEv: ParsedEvent,
+  inCutEvents: ParsedEvent[],
+  durationMs: number,
+) {
+  const lowerStart = startEv.text.toLowerCase();
+  const lowerEnd = endEv.text.toLowerCase();
+  const highStakesWords = ["never", "secret", "betray", "leave", "marry", "kill", "truth", "why", "who", "how"];
+  const cliffhangerWords = ["why", "who", "how", "what", "unless", "or else", "tomorrow", "secret", "truth"];
+  const startStakeHits = highStakesWords.filter((word) => lowerStart.includes(word)).length;
+  const endCliffHits = cliffhangerWords.filter((word) => lowerEnd.includes(word)).length;
+  const startWordCount = startEv.text.trim().split(/\s+/).filter(Boolean).length;
+  const hasQuestion = endEv.text.includes("?");
+  const hasInterruption = /(?:\.\.\.|…|—|--)\s*["']?$/.test(endEv.text.trim());
+  const hasExclamation = endEv.text.includes("!");
+  const hook = Math.min(
+    100,
+    35 +
+      (startEv.type === "dialogue" ? 20 : 8) +
+      Math.min(24, startStakeHits * 8) +
+      (startWordCount >= 4 && startWordCount <= 18 ? 12 : 4) +
+      (/[?!]/.test(startEv.text) ? 6 : 0),
+  );
+  const cliffhanger = Math.min(
+    100,
+    30 +
+      (hasQuestion ? 35 : 0) +
+      (hasInterruption ? 28 : 0) +
+      (hasExclamation ? 10 : 0) +
+      Math.min(24, endCliffHits * 8),
+  );
+  const speakers = new Set(inCutEvents.map((event) => event.speaker).filter(Boolean));
+  const contextReferences = inCutEvents.filter((event) => /\b(he|she|they|him|her|them|this|that)\b/i.test(event.text)).length;
+  const standalone = Math.max(
+    0,
+    Math.min(100, 92 - Math.max(0, speakers.size - 3) * 8 - Math.min(24, contextReferences * 3)),
+  );
+  const durationFit = Math.max(0, 100 * (1 - Math.abs(durationMs - 40_000) / 20_000));
+  const decision = Number((0.35 * hook + 0.35 * cliffhanger + 0.2 * standalone + 0.1 * durationFit).toFixed(1));
+  const qualityFlags: string[] = [];
+  if (startEv.type !== "dialogue" || startWordCount < 3) qualityFlags.push("soft hook");
+  if (!hasQuestion && !hasInterruption && !hasExclamation && endCliffHits === 0) {
+    qualityFlags.push("possible fake cliffhanger");
+  }
+  if (standalone < 70) qualityFlags.push("needs context");
+  const whyItWorks = `${startEv.speaker || "The scene"} opens on “${startEv.text.slice(0, 72)}${startEv.text.length > 72 ? "…" : ""}” and the cut ends ${
+    hasQuestion
+      ? "on an unanswered question"
+      : hasInterruption
+        ? "on an interrupted thought"
+        : hasExclamation
+          ? "on an emphatic beat"
+          : "before the next response"
+  }.`;
+
+  return {
+    scores: { hook, cliffhanger, standalone, decision },
+    qualityFlags,
+    whyItWorks,
+  };
+}
+
+export function adjustPromoCandidate(
+  original: PromoCandidateItem,
+  episode: ParsedEpisode,
+  startMs: number,
+  endMs: number,
+): PromoAdjustmentResult {
+  const errors: string[] = [];
+  const boundaryEvents = episode.events.filter(
+    (event) => event.type === "dialogue" || event.type === "action",
+  );
+  const startMatches = boundaryEvents.filter((event) => event.start_ms === startMs);
+  const endMatches = boundaryEvents.filter((event) => event.end_ms === endMs);
+  const startEv =
+    startMatches.find((event) => event.text === original.hook_line) ||
+    startMatches.find((event) => event.type === "dialogue") ||
+    startMatches[0];
+  const endEv =
+    endMatches.find((event) => event.text === original.cliffhanger_line) ||
+    endMatches.find((event) => event.type === "dialogue") ||
+    endMatches[0];
+  const durationMs = endMs - startMs;
+
+  if (!startEv) errors.push("In-point is not a dialogue or action line boundary.");
+  if (!endEv) errors.push("Out-point is not a dialogue or action line boundary.");
+  if (durationMs < 20_000 || durationMs > 60_000) errors.push("Duration must remain between 20 and 60 seconds.");
+  if (endMs <= startMs) errors.push("Out-point must be after the in-point.");
+  if (startEv && episode.language === "en" && isSentenceFragment(startEv.text)) {
+    errors.push("The selected opening appears to start on a sentence fragment.");
+  }
+  if (startEv) {
+    const startIndex = boundaryEvents.indexOf(startEv);
+    const previous = startIndex > 0 ? boundaryEvents[startIndex - 1] : null;
+    if (
+      previous &&
+      previous.speaker &&
+      previous.speaker === startEv.speaker &&
+      startEv.start_ms - previous.end_ms <= 3500
+    ) {
+      errors.push("The selected opening is inside the same speaker's continuing turn.");
+    }
+  }
+  if (errors.length || !startEv || !endEv) return { promo: null, errors };
+
+  const inCutEvents = episode.events.filter(
+    (event) => event.start_ms >= startMs && event.end_ms <= endMs,
+  );
+  const scored = scoreWindow(startEv, endEv, inCutEvents, durationMs);
+  const startClock = clock(startMs);
+  const endClock = clock(endMs);
+
+  return {
+    errors: [],
+    promo: {
+      ...original,
+      candidate_key: `${episode.episode_id}_P_${startClock.replace(/[:.]/g, "")}_${endClock.replace(/[:.]/g, "")}`,
+      duration_seconds: Number((durationMs / 1000).toFixed(1)),
+      start_clock: startClock,
+      end_clock: endClock,
+      segments: [{
+        episode: episode.episode_id,
+        start_ms: startMs,
+        end_ms: endMs,
+        start_clock: startClock,
+        end_clock: endClock,
+        duration_seconds: Number((durationMs / 1000).toFixed(1)),
+      }],
+      hook_line: startEv.text,
+      hook_speaker: startEv.speaker || "Scene Direction",
+      hook_timestamp: startClock,
+      cliffhanger_line: endEv.text,
+      cliffhanger_speaker: endEv.speaker || "Scene Direction",
+      cliffhanger_timestamp: clock(endEv.start_ms),
+      why_it_works: scored.whyItWorks,
+      scores: scored.scores,
+      quality_flags: scored.qualityFlags,
+      hard_checks_passed: [
+        "H1: Valid Range (20-60s)",
+        "H2: Real Line Boundaries",
+        "H3: Spoken Dialogue Intact",
+        "H4: No Fragment Start",
+        "H5: Episode Duration Compliant",
+      ],
+      transcript_lines: inCutEvents.map((event) => ({
+        event_type: event.type,
+        speaker: event.speaker,
+        text: event.text,
+        start_clock: clock(event.start_ms),
+        end_clock: clock(event.end_ms),
+        is_hook: event.event_id === startEv.event_id,
+        is_cliffhanger: event.event_id === endEv.event_id,
+      })),
+    },
+  };
 }
 
 export function generateEpisodePromosClient(
@@ -277,7 +538,7 @@ export function generateEpisodePromosClient(
     const startEv = dialogueEvents[i];
 
     // Must start on spoken dialogue or distinct action beat
-    if (isSentenceFragment(startEv.text)) {
+    if (ep.language === "en" && isSentenceFragment(startEv.text)) {
       summary.rejected_fragment++;
       continue;
     }
@@ -292,26 +553,20 @@ export function generateEpisodePromosClient(
       const endEv = dialogueEvents[j];
       const durationMs = endEv.end_ms - startEv.start_ms;
 
-      if (durationMs < minMs) continue;
-      if (durationMs > maxMs) break;
-
       summary.candidates_generated++;
+      if (durationMs < minMs) {
+        summary.rejected_duration++;
+        continue;
+      }
+      if (durationMs > maxMs) {
+        summary.rejected_duration++;
+        break;
+      }
 
       // Slice check: dialogue cut must encompass complete lines
       const inCutEvents = ep.events.filter((e) => e.start_ms >= startEv.start_ms && e.end_ms <= endEv.end_ms);
 
-      // Scoring
-      const hasQuestion = endEv.text.includes("?");
-      const hasExclamation = endEv.text.includes("!");
-      const hookScore = startEv.speaker ? 88 + (startEv.text.length > 25 ? 4 : 0) : 75;
-      const cliffhangerScore = hasQuestion ? 96 : hasExclamation ? 90 : 82;
-      const tensionScore = 85;
-      const durFit = Math.max(0, 100 * (1 - Math.abs(durationMs - 40000) / 20000));
-      const decisionScore = Number((0.35 * hookScore + 0.35 * cliffhangerScore + 0.15 * tensionScore + 0.15 * durFit).toFixed(1));
-
-      const whyWorks = hasQuestion
-        ? `Opens on high-stakes ultimatum and closes on unresolved question: "${endEv.text.slice(0, 50)}..."`
-        : `Strong narrative confrontation with abrupt emotional cliffhanger.`;
+      const scored = scoreWindow(startEv, endEv, inCutEvents, durationMs);
 
       candidates.push({
         id: `${ep.episode_id}_P_${startEv.event_id}_${endEv.event_id}`,
@@ -337,13 +592,8 @@ export function generateEpisodePromosClient(
         cliffhanger_line: endEv.text,
         cliffhanger_speaker: endEv.speaker || "Scene Direction",
         cliffhanger_timestamp: clock(endEv.start_ms),
-        why_it_works: whyWorks,
-        scores: {
-          hook: hookScore,
-          cliffhanger: cliffhangerScore,
-          standalone: 88,
-          decision: decisionScore,
-        },
+        why_it_works: scored.whyItWorks,
+        scores: scored.scores,
         hard_checks_passed: [
           "H1: Valid Range (20-60s)",
           "H2: Real Line Boundaries",
@@ -351,9 +601,11 @@ export function generateEpisodePromosClient(
           "H4: No Fragment Start",
           "H5: Episode Duration Compliant",
         ],
-        quality_flags: [],
+        quality_flags: scored.qualityFlags,
+        score_source: "rule-based",
         status: "selected",
         transcript_lines: inCutEvents.map((ev) => ({
+          event_type: ev.type,
           speaker: ev.speaker,
           text: ev.text,
           start_clock: clock(ev.start_ms),
@@ -410,15 +662,19 @@ export function rankAllEpisodesGlobally(
   const deferred: PromoCandidateItem[] = [];
 
   for (const p of pool) {
+    if (ranked.length >= 3) break;
     const count = epCounts[p.episode] || 0;
-    if (ranked.length < 10 && count >= varietyCap) {
+    if (count >= varietyCap) {
       deferred.push(p);
       continue;
     }
     epCounts[p.episode] = count + 1;
     ranked.push(p);
   }
-  ranked.push(...deferred);
+  for (const promo of deferred) {
+    if (ranked.length >= 3) break;
+    ranked.push(promo);
+  }
 
   // Assign global ranks
   for (let idx = 0; idx < ranked.length; idx++) {
@@ -428,17 +684,17 @@ export function rankAllEpisodesGlobally(
   const whyTop3: string[] = [];
   if (ranked[0]) {
     whyTop3.push(
-      `Rank #1 (${ranked[0].episode}, ${ranked[0].duration_seconds}s, Score ${ranked[0].scores.decision}): Highest overall narrative punch with clean standalone clarity. Hook: "${ranked[0].hook_line.slice(0, 45)}..."`
+      `Rank #1 (${ranked[0].episode}, ${ranked[0].duration_seconds}s): highest ${ranked[0].score_source || "computed"} score (${ranked[0].scores.decision}) from hook ${ranked[0].scores.hook}, cliffhanger ${ranked[0].scores.cliffhanger}, and standalone ${ranked[0].scores.standalone}. Hook: “${ranked[0].hook_line.slice(0, 60)}${ranked[0].hook_line.length > 60 ? "…" : ""}”`
     );
   }
   if (ranked[1]) {
     whyTop3.push(
-      `Rank #2 (${ranked[1].episode}, ${ranked[1].duration_seconds}s, Score ${ranked[1].scores.decision}): Introduces show diversity across episodes. Features high tension and sharp question cliffhanger without duplicating Rank #1.`
+      `Rank #2 (${ranked[1].episode}, ${ranked[1].duration_seconds}s): next highest non-overlapping ${ranked[1].score_source || "computed"} score (${ranked[1].scores.decision}) after applying the episode-variety cap.`
     );
   }
   if (ranked[2]) {
     whyTop3.push(
-      `Rank #3 (${ranked[2].episode}, ${ranked[2].duration_seconds}s, Score ${ranked[2].scores.decision}): High-stakes confrontation with an immediate emotional hook, targeting alternate audience segments.`
+      `Rank #3 (${ranked[2].episode}, ${ranked[2].duration_seconds}s): retained as the third distinct option with score ${ranked[2].scores.decision}; flags: ${ranked[2].quality_flags.join(", ") || "none detected"}.`
     );
   }
 

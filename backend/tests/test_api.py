@@ -8,7 +8,12 @@ from fastapi import HTTPException
 
 from app.api.health import health
 from app.api.evaluation import read_evaluation_rubric
-from app.api.ingestion import ingest_text, validate_archive_content
+from app.api.ingestion import (
+    ingest_text,
+    validate_archive_content,
+    validate_screenplay_files,
+)
+from app.config import get_settings
 from app.main import app
 from app.schemas.screenplay import TextIngestionRequest
 
@@ -36,6 +41,9 @@ def test_m0_routes_are_registered() -> None:
     assert ("/api/health", "GET") in route_methods
     assert ("/api/ingestion/text", "POST") in route_methods
     assert ("/api/ingestion/archive/validate", "POST") in route_methods
+    assert ("/api/ingestion/files/validate", "POST") in route_methods
+    assert ("/api/demo/scoring/prompt", "POST") in route_methods
+    assert ("/api/demo/scoring/run", "POST") in route_methods
     assert ("/api/projects", "GET") in route_methods
     assert ("/api/projects/import", "POST") in route_methods
     assert any(path.endswith("/episodes") and method == "GET" for path, method in route_methods)
@@ -70,12 +78,25 @@ def test_m0_routes_are_registered() -> None:
 
 def test_health_endpoint() -> None:
     response = resolve_immediate(health())
+    settings = get_settings()
 
     assert response.model_dump() == {
         "status": "ok",
         "service": "PromoForge Intelligence Engine",
         "version": "0.1.0",
         "environment": "development",
+        "model_provider": settings.llm_provider,
+        "model": settings.llm_model,
+        "provider_ready": not (
+            settings.llm_provider.lower() in {"gemini", "google"}
+            and not settings.gemini_api_key
+        ),
+        "configuration_warnings": (
+            ["GEMINI_API_KEY is required when LLM_PROVIDER=gemini"]
+            if settings.llm_provider.lower() in {"gemini", "google"}
+            and not settings.gemini_api_key
+            else []
+        ),
     }
 
 
@@ -150,4 +171,41 @@ def test_archive_validation_summary_uses_engine_output() -> None:
         "dialogue": 1,
         "sound": 1,
     }
+
+
+def test_batch_file_validation_keeps_successes_and_reports_failures() -> None:
+    from test_company_archive import SYNTHETIC_SCRIPT
+
+    response = validate_screenplay_files(
+        [
+            ("episode-001.txt", SYNTHETIC_SCRIPT.encode("utf-8")),
+            ("broken.txt", b"not a screenplay"),
+        ],
+        language="en",
+    )
+
+    assert response.file_count == 2
+    assert response.valid_count == 1
+    assert response.failed_count == 1
+    assert response.total_event_count == 4
+    assert response.total_scoring_event_count == 2
+    assert response.episodes[0].last_timestamp_ms == 12_000
+    assert response.episodes[0].alias_analysis_available is False
+    assert response.episodes[1].error == "missing required header: EPISODE NUMBER"
+
+
+def test_batch_file_validation_rejects_duplicate_episode_ids() -> None:
+    from test_company_archive import SYNTHETIC_SCRIPT
+
+    response = validate_screenplay_files(
+        [
+            ("first.txt", SYNTHETIC_SCRIPT.encode("utf-8")),
+            ("second.txt", SYNTHETIC_SCRIPT.encode("utf-8")),
+        ],
+        language="en",
+    )
+
+    assert response.valid_count == 1
+    assert response.failed_count == 1
+    assert "Duplicate EP_001" in (response.episodes[1].error or "")
 

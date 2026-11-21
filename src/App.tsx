@@ -18,18 +18,30 @@ import { View3RankedPromos } from "./components/View3RankedPromos";
 import { View4QualityLimits } from "./components/View4QualityLimits";
 
 import {
-  parseScreenplayText,
   generateEpisodePromosClient,
   rankAllEpisodesGlobally,
+  adjustPromoCandidate,
   type ParsedEpisode,
   type PromoCandidateItem,
   type RunCheckSummary,
 } from "./services/screenplayEngine";
 import {
-  SAMPLE_EPISODE_1,
-  SAMPLE_EPISODE_2,
-  SAMPLE_SHOW_NAME,
-} from "./data/sampleScreenplay";
+  DEFAULT_MODEL_MAX_TOKENS,
+  DEFAULT_MODEL_TEMPERATURE,
+  PRODUCT_NAME,
+} from "./config";
+import { api } from "./api/client";
+import type {
+  DemoScoreCandidateInput,
+  DemoScorePromptResponse,
+  DemoScoreResponse,
+  BackendHealthResponse,
+} from "./types";
+import {
+  MAX_MODEL_CANDIDATES,
+  shortlistCandidatesForModel,
+  type DemoRunRecord,
+} from "./services/demoRun";
 
 export type ViewTab = "upload" | "progress" | "ranked" | "quality";
 
@@ -37,6 +49,21 @@ export interface ToastItem {
   id: string;
   message: string;
   type: "success" | "warning" | "info";
+}
+
+interface RunInputContext {
+  language: string;
+  targetAudience: string;
+}
+
+interface PendingManualRun {
+  candidates: PromoCandidateItem[];
+  summary: RunCheckSummary;
+  startedAt: number;
+  createdAt: string;
+  context: RunInputContext;
+  stageTimingsMs: Record<string, number>;
+  prompt: DemoScorePromptResponse;
 }
 
 const STAGES = [
@@ -49,16 +76,43 @@ const STAGES = [
   "Export",
 ];
 
+const EMPTY_RUN_SUMMARY: RunCheckSummary = {
+  candidates_generated: 0,
+  rejected_duration: 0,
+  rejected_dialogue_slice: 0,
+  rejected_fragment: 0,
+  rejected_mid_speech: 0,
+  suppressed_overlap: 0,
+  suppressed_cliffhanger_continuation: 0,
+  candidates_accepted: 0,
+  model_calls: 0,
+  wall_time_seconds: 0,
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>("upload");
 
   // Ingestion & Screenplay State
   const [showTitle, setShowTitle] = useState<string>(() => {
-    return localStorage.getItem("pf-show-title") || SAMPLE_SHOW_NAME;
+    return sessionStorage.getItem("pf-show-title") || "";
   });
   const [minDuration, setMinDuration] = useState<number>(20);
   const [maxDuration, setMaxDuration] = useState<number>(60);
-  const [parsedEpisodes, setParsedEpisodes] = useState<ParsedEpisode[]>([]);
+  const [parsedEpisodes, setParsedEpisodes] = useState<ParsedEpisode[]>(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem("pf-parsed-episodes") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [backendHealth, setBackendHealth] = useState<BackendHealthResponse | null>(null);
+  const [backendStatus, setBackendStatus] = useState<"checking" | "connected" | "unavailable">("checking");
+  const [backendError, setBackendError] = useState("");
+  const [interruptedRun] = useState(() => {
+    const interrupted = sessionStorage.getItem("pf-run-in-progress") === "true";
+    sessionStorage.removeItem("pf-run-in-progress");
+    return interrupted;
+  });
 
   // Model & Provider State (RAM only for API Key)
   const [modelSettings, setModelSettings] = useState<ModelSettings>({
@@ -66,7 +120,8 @@ export default function App() {
     modelName: "rule-based",
     baseUrl: "https://api.openai.com/v1",
     apiKey: "",
-    temperature: 0.1,
+    temperature: DEFAULT_MODEL_TEMPERATURE,
+    maxTokens: DEFAULT_MODEL_MAX_TOKENS,
   });
 
   // Pipeline Execution State
@@ -75,14 +130,28 @@ export default function App() {
   const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [modelCallsCount, setModelCallsCount] = useState<number>(0);
   const [tokenCount, setTokenCount] = useState<number>(0);
+  const [runCancelled, setRunCancelled] = useState<boolean>(false);
   const [progressStates, setProgressStates] = useState<Record<string, EpisodeProgressState>>({});
   const timerRef = useRef<number | null>(null);
+  const cancelRequestedRef = useRef<boolean>(false);
+  const [runRecord, setRunRecord] = useState<DemoRunRecord | null>(() => {
+    try {
+      const saved = sessionStorage.getItem("pf-run-record");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [pendingManualRun, setPendingManualRun] = useState<PendingManualRun | null>(null);
+  const [manualJson, setManualJson] = useState("");
+  const [manualError, setManualError] = useState("");
+  const [manualSubmitting, setManualSubmitting] = useState(false);
 
   // Results & Human Editorial State
   const [rankedPromos, setRankedPromos] = useState<PromoCandidateItem[]>(() => {
     try {
-      const saved = localStorage.getItem("pf-ranked-promos");
-      return saved ? JSON.parse(saved) : [];
+      const saved = sessionStorage.getItem("pf-ranked-promos");
+      return saved ? (JSON.parse(saved) as PromoCandidateItem[]).slice(0, 3) : [];
     } catch {
       return [];
     }
@@ -90,7 +159,7 @@ export default function App() {
 
   const [whyTop3, setWhyTop3] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem("pf-why-top3");
+      const saved = sessionStorage.getItem("pf-why-top3");
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -99,34 +168,12 @@ export default function App() {
 
   const [runSummary, setRunSummary] = useState<RunCheckSummary>(() => {
     try {
-      const saved = localStorage.getItem("pf-run-summary");
+      const saved = sessionStorage.getItem("pf-run-summary");
       return saved
         ? JSON.parse(saved)
-        : {
-            candidates_generated: 28,
-            rejected_duration: 12,
-            rejected_dialogue_slice: 6,
-            rejected_fragment: 8,
-            rejected_mid_speech: 4,
-            suppressed_overlap: 14,
-            suppressed_cliffhanger_continuation: 6,
-            candidates_accepted: 0,
-            model_calls: 0,
-            wall_time_seconds: 1.8,
-          };
+        : EMPTY_RUN_SUMMARY;
     } catch {
-      return {
-        candidates_generated: 0,
-        rejected_duration: 0,
-        rejected_dialogue_slice: 0,
-        rejected_fragment: 0,
-        rejected_mid_speech: 0,
-        suppressed_overlap: 0,
-        suppressed_cliffhanger_continuation: 0,
-        candidates_accepted: 0,
-        model_calls: 0,
-        wall_time_seconds: 0,
-      };
+      return EMPTY_RUN_SUMMARY;
     }
   });
 
@@ -141,30 +188,174 @@ export default function App() {
     }, 4000);
   };
 
-  // Pre-load sample if initial load has no episodes
-  useEffect(() => {
-    if (parsedEpisodes.length === 0 && rankedPromos.length === 0) {
-      const ep1 = parseScreenplayText(SAMPLE_EPISODE_1, "SAMPLE_EP_001.txt");
-      const ep2 = parseScreenplayText(SAMPLE_EPISODE_2, "SAMPLE_EP_002.txt");
-      setParsedEpisodes([ep1, ep2]);
-      setShowTitle(SAMPLE_SHOW_NAME);
+  const checkBackendHealth = async () => {
+    setBackendStatus("checking");
+    setBackendError("");
+    try {
+      const health = await api.health();
+      setBackendHealth(health);
+      setBackendStatus("connected");
+    } catch (error) {
+      setBackendHealth(null);
+      setBackendStatus("unavailable");
+      setBackendError(error instanceof Error ? error.message : "Backend is unavailable");
     }
+  };
+
+  useEffect(() => {
+    void checkBackendHealth();
   }, []);
 
-  // Save state to localStorage
+  // Persist only for the current browser tab/session. Uploaded screenplay text is not kept long-term.
   useEffect(() => {
     try {
-      localStorage.setItem("pf-show-title", showTitle);
-      localStorage.setItem("pf-ranked-promos", JSON.stringify(rankedPromos));
-      localStorage.setItem("pf-why-top3", JSON.stringify(whyTop3));
-      localStorage.setItem("pf-run-summary", JSON.stringify(runSummary));
+      sessionStorage.setItem("pf-show-title", showTitle);
+      sessionStorage.setItem("pf-parsed-episodes", JSON.stringify(parsedEpisodes));
+      sessionStorage.setItem("pf-ranked-promos", JSON.stringify(rankedPromos));
+      sessionStorage.setItem("pf-why-top3", JSON.stringify(whyTop3));
+      sessionStorage.setItem("pf-run-summary", JSON.stringify(runSummary));
+      if (runRecord) sessionStorage.setItem("pf-run-record", JSON.stringify(runRecord));
+      else sessionStorage.removeItem("pf-run-record");
     } catch {
       // Ignore quota errors
     }
-  }, [showTitle, rankedPromos, whyTop3, runSummary]);
+  }, [showTitle, parsedEpisodes, rankedPromos, whyTop3, runSummary, runRecord]);
+
+  const toScoreCandidates = (candidates: PromoCandidateItem[]): DemoScoreCandidateInput[] =>
+    candidates.map((candidate) => ({
+      candidate_id: candidate.id,
+      episode: candidate.episode,
+      start_clock: candidate.start_clock,
+      end_clock: candidate.end_clock,
+      duration_seconds: candidate.duration_seconds,
+      hook_line: candidate.hook_line,
+      cliffhanger_line: candidate.cliffhanger_line,
+      transcript_lines: candidate.transcript_lines
+        .filter((line) => line.event_type === "dialogue" || line.event_type === "action")
+        .map((line) => ({
+          speaker: line.speaker,
+          text: line.text,
+          start_clock: line.start_clock,
+          end_clock: line.end_clock,
+        })),
+    }));
+
+  const applyModelScores = (
+    candidates: PromoCandidateItem[],
+    response: DemoScoreResponse,
+  ): PromoCandidateItem[] => {
+    const scoreById = new Map(response.scores.map((score) => [score.candidate_id, score]));
+    return candidates.map((candidate) => {
+      const score = scoreById.get(candidate.id);
+      if (!score) return candidate;
+      const durationFit = Math.max(
+        0,
+        100 * (1 - Math.abs(candidate.duration_seconds - 40) / 20),
+      );
+      const decision = Number((
+        0.35 * score.hook +
+        0.35 * score.cliffhanger +
+        0.2 * score.standalone +
+        0.1 * durationFit
+      ).toFixed(1));
+      return {
+        ...candidate,
+        why_it_works: score.why_it_works,
+        scores: {
+          hook: score.hook,
+          cliffhanger: score.cliffhanger,
+          standalone: score.standalone,
+          decision,
+        },
+        score_source: `${response.provider}/${response.model}`,
+      };
+    });
+  };
+
+  const finalizeRun = ({
+    candidates,
+    summary,
+    startedAt,
+    createdAt,
+    context,
+    stageTimingsMs,
+    scoreResponse,
+    modelCandidatesScored = 0,
+    status,
+    errors = [],
+  }: {
+    candidates: PromoCandidateItem[];
+    summary: RunCheckSummary;
+    startedAt: number;
+    createdAt: string;
+    context: RunInputContext;
+    stageTimingsMs: Record<string, number>;
+    scoreResponse?: DemoScoreResponse;
+    modelCandidatesScored?: number;
+    status: DemoRunRecord["status"];
+    errors?: string[];
+  }) => {
+    const { ranked, whyTop3: top3Reasons } = rankAllEpisodesGlobally(candidates, 2);
+    const wallTimeSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(2));
+    const completedSummary: RunCheckSummary = {
+      ...summary,
+      candidates_accepted: 0,
+      model_calls: scoreResponse?.model_calls ?? 0,
+      wall_time_seconds: wallTimeSeconds,
+    };
+    const record: DemoRunRecord = {
+      run_id: `run-${new Date(startedAt).toISOString().replace(/[:.]/g, "-")}`,
+      status,
+      created_at: createdAt,
+      completed_at: new Date().toISOString(),
+      show_title: showTitle || "Untitled show",
+      language: context.language,
+      target_audience: context.targetAudience.trim() || null,
+      episode_count: parsedEpisodes.length,
+      parameters: {
+        min_duration_seconds: minDuration,
+        max_duration_seconds: maxDuration,
+        variety_cap: 2,
+        model_shortlist_limit: MAX_MODEL_CANDIDATES,
+        model_candidates_scored: modelCandidatesScored,
+      },
+      model: {
+        provider: scoreResponse?.provider ?? modelSettings.provider,
+        model: scoreResponse?.model ?? modelSettings.modelName,
+        base_url: modelSettings.provider === "openai" ? modelSettings.baseUrl : null,
+      },
+      usage: {
+        model_calls: scoreResponse?.model_calls ?? 0,
+        input_tokens: scoreResponse?.input_tokens ?? null,
+        output_tokens: scoreResponse?.output_tokens ?? null,
+        estimated_cost: scoreResponse?.estimated_cost ?? null,
+        wall_time_seconds: wallTimeSeconds,
+      },
+      stage_timings_ms: stageTimingsMs,
+      check_summary: completedSummary,
+      prompt_sha256: scoreResponse?.prompt_sha256 ?? null,
+      errors,
+      raw_model_responses: scoreResponse
+        ? [{ filename: "model_response_001.json", content: scoreResponse.raw_response }]
+        : [],
+    };
+    setRankedPromos(ranked);
+    setWhyTop3(top3Reasons);
+    setRunSummary(completedSummary);
+    setRunRecord(record);
+    sessionStorage.removeItem("pf-run-in-progress");
+    setModelCallsCount(scoreResponse?.model_calls ?? 0);
+    setTokenCount((scoreResponse?.input_tokens ?? 0) + (scoreResponse?.output_tokens ?? 0));
+    setIsRunning(false);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    return ranked;
+  };
 
   // Run Pipeline Execution
-  const handleRunPipeline = async () => {
+  const handleRunPipeline = async (context: RunInputContext) => {
     if (parsedEpisodes.length === 0) return;
 
     setActiveTab("progress");
@@ -173,6 +364,17 @@ export default function App() {
     setElapsedSeconds(0);
     setModelCallsCount(0);
     setTokenCount(0);
+    setRunCancelled(false);
+    cancelRequestedRef.current = false;
+    setRankedPromos([]);
+    setWhyTop3([]);
+    setRunSummary(EMPTY_RUN_SUMMARY);
+    setRunRecord(null);
+    sessionStorage.setItem("pf-run-in-progress", "true");
+    setPendingManualRun(null);
+    setManualJson("");
+    setManualError("");
+    sessionStorage.removeItem("pf-approved-candidates");
 
     const initialStates: Record<string, EpisodeProgressState> = {};
     for (const ep of parsedEpisodes) {
@@ -186,6 +388,8 @@ export default function App() {
     setProgressStates(initialStates);
 
     const startTimestamp = Date.now();
+    const createdAt = new Date(startTimestamp).toISOString();
+    const stageTimingsMs: Record<string, number> = {};
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = window.setInterval(() => {
       setElapsedSeconds((Date.now() - startTimestamp) / 1000);
@@ -200,20 +404,35 @@ export default function App() {
       suppressed_overlap: 0,
       suppressed_cliffhanger_continuation: 0,
       candidates_accepted: 0,
-      model_calls: modelSettings.provider === "fallback" ? 0 : parsedEpisodes.length,
+      model_calls: 0,
       wall_time_seconds: 0,
     };
 
-    // Staged execution simulation / computation
     const allCandidates: PromoCandidateItem[] = [];
-
-    for (let s = 0; s < STAGES.length; s++) {
+    let cancelled = false;
+    let modelError: string | null = null;
+    let modelCandidatesScored = 0;
+    let scoreResponse: DemoScoreResponse | undefined;
+    stageLoop: for (let s = 0; s < STAGES.length; s++) {
+      if (cancelRequestedRef.current) {
+        cancelled = true;
+        break;
+      }
       setCurrentStageIndex(s);
-      await new Promise((r) => setTimeout(r, 260));
+      const stageStarted = performance.now();
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      if (cancelRequestedRef.current) {
+        cancelled = true;
+        break;
+      }
 
       if (s === 1) {
         // Generate Candidates stage
         for (const ep of parsedEpisodes) {
+          if (cancelRequestedRef.current) {
+            cancelled = true;
+            break stageLoop;
+          }
           setProgressStates((prev) => ({
             ...prev,
             [ep.episode_id]: {
@@ -233,7 +452,79 @@ export default function App() {
               candidates_found: cands.length,
             },
           }));
-          await new Promise((r) => setTimeout(r, 80));
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      }
+
+      if (s === 2 && modelSettings.provider !== "fallback" && allCandidates.length > 0) {
+        const modelCandidates = shortlistCandidatesForModel(allCandidates);
+        modelCandidatesScored = modelCandidates.length;
+        allCandidates.splice(0, allCandidates.length, ...modelCandidates);
+        const promptPayload = {
+          show_title: showTitle || "Untitled show",
+          language: context.language,
+          target_audience: context.targetAudience.trim() || null,
+          candidates: toScoreCandidates(allCandidates),
+        };
+        if (modelSettings.provider === "no-api") {
+          try {
+            const prompt = await api.createDemoScoringPrompt(promptPayload);
+            stageTimingsMs[STAGES[s]] = Math.round(performance.now() - stageStarted);
+            setPendingManualRun({
+              candidates: allCandidates,
+              summary,
+              startedAt: startTimestamp,
+              createdAt,
+              context,
+              stageTimingsMs,
+              prompt,
+            });
+            setIsRunning(false);
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            showToast({
+              message: "Prompt ready. Paste one schema-valid JSON response to continue the run.",
+              type: "info",
+            });
+            return;
+          } catch (error) {
+            modelError = error instanceof Error ? error.message : String(error);
+            break stageLoop;
+          }
+        }
+
+        try {
+          scoreResponse = await api.runDemoScoring({
+            ...promptPayload,
+            model: {
+              provider: modelSettings.provider,
+              model: modelSettings.modelName,
+              base_url: modelSettings.baseUrl,
+              api_key: modelSettings.apiKey || undefined,
+              temperature: modelSettings.temperature,
+              max_tokens: modelSettings.maxTokens,
+            },
+          });
+          const scored = applyModelScores(allCandidates, scoreResponse);
+          allCandidates.splice(0, allCandidates.length, ...scored);
+          setModelCallsCount(scoreResponse.model_calls);
+          setTokenCount((scoreResponse.input_tokens ?? 0) + (scoreResponse.output_tokens ?? 0));
+        } catch (error) {
+          modelError = error instanceof Error ? error.message : String(error);
+          for (const episode of parsedEpisodes) {
+            setProgressStates((previous) => ({
+              ...previous,
+              [episode.episode_id]: {
+                ...previous[episode.episode_id],
+                status: "failed",
+                stage: "Model scoring failed",
+                error: modelError || "Model scoring failed",
+              },
+            }));
+          }
+          break stageLoop;
         }
       }
 
@@ -250,50 +541,133 @@ export default function App() {
           }));
         }
       }
+      stageTimingsMs[STAGES[s]] = Math.round(performance.now() - stageStarted);
     }
 
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    // Stage 6: Rank Globally with Variety Cap
-    const { ranked, whyTop3: top3Reasons } = rankAllEpisodesGlobally(allCandidates, 2);
-
-    // Check localStorage for any pre-existing approved statuses
-    try {
-      const approvedIds = new Set<string>(
-        JSON.parse(localStorage.getItem("pf-approved-candidates") || "[]")
-      );
-      for (const p of ranked) {
-        if (approvedIds.has(p.id)) {
-          p.status = "approved";
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    summary.candidates_accepted = ranked.filter((p) => p.status === "approved").length;
-    summary.wall_time_seconds = Number(((Date.now() - startTimestamp) / 1000).toFixed(2));
-
-    setRankedPromos(ranked);
-    setWhyTop3(top3Reasons);
-    setRunSummary(summary);
-    setIsRunning(false);
-
-    showToast({
-      message: `Pipeline complete: ${ranked.length} promos ranked globally across ${parsedEpisodes.length} episode(s).`,
-      type: "success",
+    const status: DemoRunRecord["status"] = cancelled
+      ? "cancelled"
+      : modelError
+        ? "partial_model_failure"
+        : "complete";
+    const ranked = finalizeRun({
+      candidates: allCandidates,
+      summary,
+      startedAt: startTimestamp,
+      createdAt,
+      context,
+      stageTimingsMs,
+      scoreResponse,
+      modelCandidatesScored,
+      status,
+      errors: modelError ? [modelError] : [],
     });
 
-    // Automatically transition to View 3 after a moment
-    setTimeout(() => {
+    showToast({
+      message: cancelled
+        ? `Run cancelled. ${ranked.length} partial ranked promo(s) retained.`
+        : modelError
+          ? `Model scoring failed: ${modelError}. Partial rule shortlist retained and clearly labelled.`
+          : `Pipeline complete: ${ranked.length} promos ranked globally across ${parsedEpisodes.length} episode(s).`,
+      type: cancelled || modelError ? "warning" : "success",
+    });
+
+    if (!cancelled) {
+      setTimeout(() => {
+        setActiveTab("ranked");
+      }, 600);
+    }
+  };
+
+  const handleManualScoreSubmit = async () => {
+    if (!pendingManualRun || !manualJson.trim()) {
+      setManualError("Paste the model JSON response before continuing.");
+      return;
+    }
+    setManualSubmitting(true);
+    setManualError("");
+    try {
+      const response = await api.runDemoScoring({
+        show_title: showTitle || "Untitled show",
+        language: pendingManualRun.context.language,
+        target_audience: pendingManualRun.context.targetAudience.trim() || null,
+        candidates: toScoreCandidates(pendingManualRun.candidates),
+        model: {
+          provider: "no-api",
+          model: "manual-paste",
+          base_url: "",
+          temperature: modelSettings.temperature,
+          max_tokens: modelSettings.maxTokens,
+        },
+        manual_payload: manualJson,
+      });
+      const scored = applyModelScores(pendingManualRun.candidates, response);
+      const stageTimingsMs = {
+        ...pendingManualRun.stageTimingsMs,
+        Score: response.latency_ms,
+        Checks: 0,
+        "De-conflict": 0,
+        Rank: 0,
+        Export: 0,
+      };
+      for (const episode of parsedEpisodes) {
+        setProgressStates((previous) => ({
+          ...previous,
+          [episode.episode_id]: {
+            ...previous[episode.episode_id],
+            status: "done",
+            stage: "Complete",
+          },
+        }));
+      }
+      const ranked = finalizeRun({
+        candidates: scored,
+        summary: pendingManualRun.summary,
+        startedAt: pendingManualRun.startedAt,
+        createdAt: pendingManualRun.createdAt,
+        context: pendingManualRun.context,
+        stageTimingsMs,
+        scoreResponse: response,
+        status: "complete",
+      });
+      setPendingManualRun(null);
+      setManualJson("");
+      showToast({
+        message: `Manual JSON validated. ${ranked.length} promos ranked with the pasted model scores.`,
+        type: "success",
+      });
       setActiveTab("ranked");
-    }, 600);
+    } catch (error) {
+      setManualError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setManualSubmitting(false);
+    }
+  };
+
+  const handleManualRunCancel = () => {
+    if (!pendingManualRun) return;
+    const ranked = finalizeRun({
+      candidates: pendingManualRun.candidates,
+      summary: pendingManualRun.summary,
+      startedAt: pendingManualRun.startedAt,
+      createdAt: pendingManualRun.createdAt,
+      context: pendingManualRun.context,
+      stageTimingsMs: pendingManualRun.stageTimingsMs,
+      status: "cancelled",
+      errors: ["No-API scoring was cancelled before JSON was supplied."],
+    });
+    setPendingManualRun(null);
+    setManualJson("");
+    setRunCancelled(true);
+    showToast({
+      message: `Manual scoring cancelled. ${ranked.length} partial rule shortlist item(s) retained.`,
+      type: "warning",
+    });
+    setActiveTab("ranked");
   };
 
   const handleCancelRun = () => {
+    cancelRequestedRef.current = true;
+    setRunCancelled(true);
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -310,25 +684,37 @@ export default function App() {
     status: PromoCandidateItem["status"],
     rejectionReason?: string
   ) => {
-    setRankedPromos((prev) =>
-      prev.map((p) =>
+    setRankedPromos((prev) => {
+      const next = prev.map((p) =>
         p.id === promoId
           ? { ...p, status, rejection_reason: rejectionReason }
           : p
-      )
-    );
+      );
+      setRunSummary((summary) => ({
+        ...summary,
+        candidates_accepted: next.filter((promo) => promo.status === "approved").length,
+      }));
+      setRunRecord((record) => record ? {
+        ...record,
+        check_summary: {
+          ...record.check_summary,
+          candidates_accepted: next.filter((promo) => promo.status === "approved").length,
+        },
+      } : record);
+      return next;
+    });
 
     // Persist approval / rejection lists
     try {
       const approvedList = new Set<string>(
-        JSON.parse(localStorage.getItem("pf-approved-candidates") || "[]")
+        JSON.parse(sessionStorage.getItem("pf-approved-candidates") || "[]")
       );
       if (status === "approved") {
         approvedList.add(promoId);
       } else {
         approvedList.delete(promoId);
       }
-      localStorage.setItem("pf-approved-candidates", JSON.stringify([...approvedList]));
+      sessionStorage.setItem("pf-approved-candidates", JSON.stringify([...approvedList]));
     } catch {
       // ignore
     }
@@ -350,28 +736,9 @@ export default function App() {
     setRankedPromos((prev) =>
       prev.map((p) => {
         if (p.id !== promoId) return p;
-        const dur = (endMs - startMs) / 1000;
-        const startSec = startMs / 1000;
-        const endSec = endMs / 1000;
-        const startClock = `${Math.floor(startSec / 60).toString().padStart(2, "0")}:${(startSec % 60).toFixed(2).padStart(5, "0")}`;
-        const endClock = `${Math.floor(endSec / 60).toString().padStart(2, "0")}:${(endSec % 60).toFixed(2).padStart(5, "0")}`;
-
-        return {
-          ...p,
-          duration_seconds: Number(dur.toFixed(1)),
-          start_clock: startClock,
-          end_clock: endClock,
-          segments: [
-            {
-              ...p.segments[0],
-              start_ms: startMs,
-              end_ms: endMs,
-              start_clock: startClock,
-              end_clock: endClock,
-              duration_seconds: Number(dur.toFixed(1)),
-            },
-          ],
-        };
+        const episode = parsedEpisodes.find((item) => item.episode_id === p.episode);
+        if (!episode) return p;
+        return adjustPromoCandidate(p, episode, startMs, endMs).promo || p;
       })
     );
   };
@@ -380,7 +747,7 @@ export default function App() {
     <div className="min-h-screen bg-neutral-950 text-neutral-100 font-sans flex flex-col selection:bg-amber-500/30 selection:text-amber-200">
       {/* Top Navbar */}
       <header className="sticky top-0 z-40 bg-neutral-900/95 backdrop-blur-md border-b border-neutral-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:h-16 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Logo & Product Name */}
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-400 text-neutral-950 flex items-center justify-center font-bold shadow-md shadow-amber-500/20">
@@ -389,7 +756,7 @@ export default function App() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-extrabold text-white text-base tracking-tight font-mono">
-                  PromoForge
+                  {PRODUCT_NAME}
                 </span>
                 <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
                   Problem 1
@@ -399,10 +766,20 @@ export default function App() {
                 AI Editorial Workflow for Microdrama Screenplays
               </div>
             </div>
+            <span className={`hidden md:inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold ${
+              backendStatus === "connected"
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                : backendStatus === "checking"
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                  : "border-red-500/30 bg-red-500/10 text-red-300"
+            }`}>
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+              {backendStatus === "connected" ? `API ${backendHealth?.version}` : backendStatus === "checking" ? "API waking up" : "API unavailable"}
+            </span>
           </div>
 
           {/* Navigation Tabs (DEMO.md Section 4: Four Primary Views) */}
-          <nav className="flex items-center gap-1 bg-neutral-950 p-1 rounded-xl border border-neutral-800 text-xs">
+          <nav className="flex w-full sm:w-auto items-center gap-1 overflow-x-auto bg-neutral-950 p-1 rounded-xl border border-neutral-800 text-xs">
             <button
               type="button"
               onClick={() => setActiveTab("upload")}
@@ -474,10 +851,37 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {backendStatus === "checking" && (
+          <div className="mb-5 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+            <span>Waking up the server, please wait… Rule-only scoring remains available.</span>
+          </div>
+        )}
+        {backendStatus === "unavailable" && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
+            <span>Backend unavailable: {backendError}. Locally, start it with <code>cd backend; .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000</code>. Rule-only scoring still works.</span>
+            <button type="button" onClick={() => void checkBackendHealth()} className="rounded border border-red-400/40 px-3 py-1.5 font-semibold hover:bg-red-500/10">Retry</button>
+          </div>
+        )}
+        {interruptedRun && (
+          <div className="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+            The previous run was interrupted by a page reload. Parsed inputs and completed results were restored; start a new run to resume processing.
+          </div>
+        )}
         {activeTab === "upload" && (
           <View1StartUpload
             parsedEpisodes={parsedEpisodes}
-            setParsedEpisodes={setParsedEpisodes}
+            setParsedEpisodes={(episodes) => {
+              setParsedEpisodes(episodes);
+              setRankedPromos([]);
+              setWhyTop3([]);
+              setRunSummary(EMPTY_RUN_SUMMARY);
+              setRunRecord(null);
+              sessionStorage.removeItem("pf-ranked-promos");
+              sessionStorage.removeItem("pf-why-top3");
+              sessionStorage.removeItem("pf-run-summary");
+              sessionStorage.removeItem("pf-approved-candidates");
+              sessionStorage.removeItem("pf-run-record");
+            }}
             showTitle={showTitle}
             setShowTitle={setShowTitle}
             minDuration={minDuration}
@@ -501,6 +905,8 @@ export default function App() {
             modelCallsCount={modelCallsCount}
             tokenCount={tokenCount}
             isRunning={isRunning}
+            wasCancelled={runCancelled}
+            awaitingManualScore={Boolean(pendingManualRun)}
             onCancel={handleCancelRun}
             onViewRanked={() => setActiveTab("ranked")}
           />
@@ -509,8 +915,10 @@ export default function App() {
         {activeTab === "ranked" && (
           <View3RankedPromos
             promos={rankedPromos}
+            episodes={parsedEpisodes}
             whyTop3={whyTop3}
             showTitle={showTitle}
+            runRecord={runRecord}
             onUpdatePromoStatus={handleUpdatePromoStatus}
             onAdjustPromoBoundaries={handleAdjustPromoBoundaries}
             showToast={showToast}
@@ -520,16 +928,100 @@ export default function App() {
         {activeTab === "quality" && (
           <View4QualityLimits
             runSummary={runSummary}
-            totalEpisodesCount={parsedEpisodes.length || 50}
+            totalEpisodesCount={parsedEpisodes.length}
           />
         )}
       </main>
+
+      {pendingManualRun && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-blue-500/30 bg-neutral-900 p-6 shadow-2xl space-y-5">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-blue-300">
+                No-API scoring checkpoint
+              </div>
+              <h2 className="mt-1 text-xl font-bold text-white">Copy prompt, then paste schema-valid JSON</h2>
+              <p className="mt-1 text-sm text-neutral-400">
+                The run is paused with {pendingManualRun.candidates.length} source-grounded candidate(s). No scores will be fabricated if validation fails.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <label className="text-xs font-semibold text-neutral-300">Scoring prompt</label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(pendingManualRun.prompt.prompt);
+                    showToast({ message: "Scoring prompt copied to clipboard.", type: "success" });
+                  }}
+                  className="rounded-md border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-700 cursor-pointer"
+                >
+                  Copy prompt
+                </button>
+              </div>
+              <textarea
+                readOnly
+                value={pendingManualRun.prompt.prompt}
+                className="h-48 w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 font-mono text-[11px] leading-relaxed text-neutral-300"
+              />
+              <details className="rounded-lg border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-400">
+                <summary className="cursor-pointer text-neutral-300">Required JSON schema</summary>
+                <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-[10px] text-neutral-400">
+                  {JSON.stringify(pendingManualRun.prompt.response_schema, null, 2)}
+                </pre>
+              </details>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-neutral-300">Paste model JSON response</label>
+              <textarea
+                value={manualJson}
+                onChange={(event) => {
+                  setManualJson(event.target.value);
+                  setManualError("");
+                }}
+                placeholder='{"scores":[{"candidate_id":"...","hook":80,"cliffhanger":85,"standalone":75,"why_it_works":"..."}]}'
+                className="h-48 w-full resize-y rounded-lg border border-neutral-700 bg-neutral-950 p-3 font-mono text-xs text-white placeholder-neutral-600 focus:border-blue-500 focus:outline-none"
+              />
+              {manualError && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+                  {manualError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-800 pt-4">
+              <span className="text-[11px] text-neutral-500 font-mono">
+                Prompt SHA-256: {pendingManualRun.prompt.prompt_sha256}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleManualRunCancel}
+                  className="rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2 text-xs font-medium text-neutral-300 hover:bg-neutral-700 cursor-pointer"
+                >
+                  Cancel and keep partials
+                </button>
+                <button
+                  type="button"
+                  disabled={manualSubmitting || !manualJson.trim()}
+                  onClick={() => void handleManualScoreSubmit()}
+                  className="rounded-lg bg-blue-500 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+                >
+                  {manualSubmitting ? "Validating…" : "Validate JSON and finish"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="bg-neutral-950 border-t border-neutral-800/80 py-4 text-xs text-neutral-500">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-neutral-400">PromoForge</span>
+            <span className="font-semibold text-neutral-400">{PRODUCT_NAME}</span>
             <span>·</span>
             <span>Kuku AI Generalist Assignment (Problem 1)</span>
           </div>

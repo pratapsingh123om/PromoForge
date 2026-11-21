@@ -31,6 +31,8 @@ interface View2Props {
   modelCallsCount: number;
   tokenCount: number;
   isRunning: boolean;
+  wasCancelled: boolean;
+  awaitingManualScore: boolean;
   onCancel: () => void;
   onViewRanked: () => void;
 }
@@ -44,6 +46,8 @@ export function View2Progress({
   modelCallsCount,
   tokenCount,
   isRunning,
+  wasCancelled,
+  awaitingManualScore,
   onCancel,
   onViewRanked,
 }: View2Props) {
@@ -71,6 +75,16 @@ export function View2Progress({
                   <LoaderCircle className="animate-spin text-amber-400" size={20} />
                   Running Discovery Pipeline…
                 </>
+              ) : awaitingManualScore ? (
+                <>
+                  <AlertCircle className="text-blue-400" size={20} />
+                  Waiting for No-API JSON
+                </>
+              ) : wasCancelled ? (
+                <>
+                  <AlertCircle className="text-amber-400" size={20} />
+                  Run Cancelled — Partial Results Retained
+                </>
               ) : (
                 <>
                   <CheckCircle2 className="text-emerald-400" size={20} />
@@ -79,8 +93,11 @@ export function View2Progress({
               )}
             </h1>
             <p className="text-xs text-neutral-400 mt-1">
-              Processing {episodes.length} episode(s) through parse, candidate windowing,
-              hard checks, de-conflict, and global variety ranking.
+              {awaitingManualScore
+                ? "Candidate generation is complete. The run will continue only after the pasted model JSON passes schema and candidate-ID validation."
+                : wasCancelled
+                ? "Processing stopped at the requested checkpoint. Any candidates already computed remain available."
+                : `Processing ${episodes.length} episode(s) through parse, candidate windowing, hard checks, de-conflict, and global variety ranking.`}
             </p>
           </div>
 
@@ -132,10 +149,12 @@ export function View2Progress({
           <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800/60">
             <div className="flex items-center gap-1.5 text-xs text-neutral-400">
               <Coins size={13} className="text-emerald-400" />
-              <span>Estimated Cost</span>
+              <span>Tokens / Cost</span>
             </div>
             <div className="text-lg font-bold text-white mt-1 font-mono">
-              {modelCallsCount === 0 ? "$0.00 (Rule engine)" : `${tokenCount} tok`}
+              {modelCallsCount === 0
+                ? "$0.00 (no model call)"
+                : `${tokenCount || "N/A"} tok · cost N/A`}
             </div>
           </div>
 

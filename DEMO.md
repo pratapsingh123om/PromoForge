@@ -38,7 +38,7 @@ Each episode is a `.txt` with:
 Parser requirements:
 - Convert timestamps to milliseconds internally.
 - Keep block types separate. Dialogue and ACTION may be candidate boundaries. CAMERA and SOUND FX must NOT be used as scoring evidence (SOUND FX leaks cliffhanger cues; camera notes describe shots, not story).
-- Normalize speaker aliases using the header logline and continuity notes (for example "The Former Groom" = Gerald, "Lady in Gold Gown" = Clarissa). Show unresolved aliases to the user instead of guessing silently.
+- Normalize speaker aliases using the header logline and continuity notes (for example an invented "Masked Visitor" alias may map to "Rowan"). Show unresolved aliases to the user instead of guessing silently.
 - Read the full episode to the end timestamp. Report parsed event count per episode and the last parsed timestamp so truncation is visible.
 - If a file does not match the format, show a clear error naming the file and the first line that failed. Do not skip it silently.
 
@@ -195,21 +195,21 @@ Record in your own voice. Show the failure log honestly.
 
 ## 12. Acceptance checklist (agent: tick only what you verified by running it)
 
-- [ ] Parses all 50 episodes without silent skips; parse summary visible
-- [ ] Every promo duration within 20-60s; asserted in tests
-- [ ] No cut inside a dialogue line; asserted in tests
-- [ ] No promo starts on a sentence fragment or inside another promo's reply window
-- [ ] Global ranking across all episodes with an episode-variety cap
-- [ ] Hook and cliffhanger fields each contain exactly one real line
-- [ ] No fabricated or constant "confidence" anywhere in UI or exports
-- [ ] Quality view shows only measured numbers; others say "Not measured"
+- [x] Parses all 50 episodes without silent skips; parse summary visible
+- [x] Every promo duration within 20-60s; asserted in tests
+- [x] No cut inside a dialogue line; asserted in tests
+- [x] No promo starts on a sentence fragment or inside another promo's reply window
+- [x] Global ranking across all episodes with an episode-variety cap
+- [x] Hook and cliffhanger fields each contain exactly one real line
+- [x] No fabricated or constant "confidence" anywhere in UI or exports
+- [x] Quality view shows only measured numbers; others say "Not measured"
 - [ ] Gold labels were written by the user, not the agent
-- [ ] Model swap works by config only; no-API mode works; rule-only fallback works
-- [ ] New unseen episode folder runs end to end without code changes
-- [ ] Exports generated from stored run; raw model outputs saved unedited
-- [ ] Input pack is git-ignored and not in the public repo or hosted demo
-- [ ] README: install, run, config, how to swap model, known limits
-- [ ] One product name used everywhere
+- [x] Model swap works by config only; no-API mode works; rule-only fallback works
+- [x] New unseen episode folder runs end to end without code changes
+- [x] Exports generated from stored run; raw model outputs saved unedited
+- [x] Input pack is git-ignored and not in the public repo or hosted demo
+- [x] README: install, run, config, how to swap model, known limits
+- [x] One product name used everywhere
 
 ---
 

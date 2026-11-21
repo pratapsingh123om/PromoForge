@@ -420,7 +420,6 @@ export function RecommendedPromoStudio({
               ["Tension", components.tension],
               ["Curiosity", components.curiosity],
               ["Ending", components.ending],
-              ["Confidence", components.confidence],
               ["Duration fit", components.duration_fit],
             ].map(([label, value]) => (
               <div key={label as string}><span>{label}</span><b>{Math.round(value as number)}</b><i><em style={{ width: `${value}%` }} /></i></div>
@@ -437,7 +436,7 @@ export function RecommendedPromoStudio({
               <div><Badge tone={event.event_type === "dialogue" ? "purple" : "orange"}>{event.event_type}</Badge><time><Clock3 size={13} />{clock(event.start_ms)}–{clock(event.end_ms)}</time></div>
               <b>{event.character || "Scene direction"}</b>
               <p>{event.text}</p>
-              <footer><span>{event.narrative_type.replaceAll("_", " ")}</span><span>Hook {event.hook_strength}</span><span>Tension {event.tension}</span><span>{Math.round(event.confidence * 100)}% confidence</span></footer>
+              <footer><span>{event.narrative_type.replace(/_/g, " ")}</span><span>Hook {event.hook_strength}</span><span>Tension {event.tension}</span></footer>
             </article>
           ))}
         </div>

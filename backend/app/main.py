@@ -12,6 +12,7 @@ from app.api.jobs import router as jobs_router
 from app.api.projects import router as projects_router
 from app.api.promos import router as promos_router
 from app.api.reviews import router as reviews_router
+from app.api.demo import router as demo_router
 from app.config import get_settings
 from app.database import init_database
 
@@ -50,4 +51,5 @@ app.include_router(projects_router, prefix=settings.api_prefix)
 app.include_router(jobs_router, prefix=settings.api_prefix)
 app.include_router(promos_router, prefix=settings.api_prefix)
 app.include_router(reviews_router, prefix=settings.api_prefix)
+app.include_router(demo_router, prefix=settings.api_prefix)
 

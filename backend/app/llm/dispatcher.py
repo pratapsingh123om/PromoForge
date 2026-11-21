@@ -40,12 +40,14 @@ class OpenAICompatibleProvider(LLMProvider):
         base_url: str = "https://api.openai.com/v1",
         api_key: str = "",
         temperature: float = 0.1,
+        max_tokens: int = 4096,
         timeout_seconds: int = 60,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.temperature = temperature
+        self.max_tokens = max_tokens
         self.timeout = timeout_seconds
 
     async def generate_structured(
@@ -74,6 +76,7 @@ class OpenAICompatibleProvider(LLMProvider):
             ],
             "response_format": {"type": "json_object"},
             "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
         }
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -86,15 +89,22 @@ class OpenAICompatibleProvider(LLMProvider):
 
         if response.status_code == 429 or response.status_code >= 500:
             raise RetriableProviderError(f"OpenAI endpoint returned {response.status_code}")
+        if response.status_code in {401, 403}:
+            raise ProviderError("OpenAI-compatible API key was rejected. Check the key and permissions.")
+        if response.status_code == 404:
+            raise ProviderError(f"OpenAI-compatible model '{self.model}' or base URL was not found.")
         if response.status_code != 200:
             raise ProviderError(f"OpenAI endpoint error ({response.status_code}): {response.text[:200]}")
 
-        body = response.json()
-        raw_content = body["choices"][0]["message"]["content"]
+        try:
+            body = response.json()
+            raw_content = body["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise RetriableProviderError("OpenAI-compatible endpoint returned malformed JSON") from exc
         try:
             val = response_schema.model_validate_json(raw_content)
         except ValidationError as exc:
-            raise ProviderError(f"Model response failed schema validation: {exc}") from exc
+            raise RetriableProviderError(f"Model response failed schema validation: {exc}") from exc
 
         usage_data = body.get("usage", {})
         usage = ProviderUsage(
@@ -106,6 +116,7 @@ class OpenAICompatibleProvider(LLMProvider):
             value=val,
             usage=usage,
             raw_output=val.model_dump(mode="json"),
+            raw_text=raw_content,
         )
 
 
@@ -139,6 +150,11 @@ class NoApiManualProvider(LLMProvider):
             value=val,
             usage=ProviderUsage(input_tokens=0, output_tokens=0, latency_ms=0),
             raw_output=val.model_dump(mode="json"),
+            raw_text=(
+                self.manual_json
+                if isinstance(self.manual_json, str)
+                else json.dumps(self.manual_json, ensure_ascii=False)
+            ),
         )
 
 
@@ -156,13 +172,19 @@ async def call_llm(
     provider_type = cfg.provider.lower()
 
     if provider_type in {"gemini", "google"}:
-        provider = GeminiProvider(api_key=cfg.api_key, model=cfg.model)
+        provider = GeminiProvider(
+            api_key=cfg.api_key,
+            model=cfg.model,
+            temperature=cfg.temperature,
+            max_tokens=cfg.max_tokens,
+        )
     elif provider_type in {"openai", "openai-compatible", "groq", "together"}:
         provider = OpenAICompatibleProvider(
             model=cfg.model,
             base_url=cfg.base_url,
             api_key=cfg.api_key,
             temperature=cfg.temperature,
+            max_tokens=cfg.max_tokens,
         )
     elif provider_type in {"no-api", "paste", "manual"}:
         provider = NoApiManualProvider(manual_json=manual_payload)

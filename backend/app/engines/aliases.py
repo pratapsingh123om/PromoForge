@@ -16,8 +16,8 @@ _PAREN_ALIAS_PATTERN = re.compile(
 def extract_alias_map(continuity_notes: str, logline: str = "") -> dict[str, str]:
     """Extract character alias mapping from script continuity notes and logline.
     
-    Example: 'The Former Groom is Gerald. Lady in Gold Gown is Clarissa.'
-    -> {'the former groom': 'Gerald', 'lady in gold gown': 'Clarissa'}
+    Example: 'The Masked Visitor is Rowan.'
+    -> {'the masked visitor': 'Rowan'}
     """
     mapping: dict[str, str] = {}
     combined = f"{continuity_notes}\n{logline}"

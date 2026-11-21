@@ -149,6 +149,32 @@ export interface PromoRecommendationResponse {
   candidates: PromoRecommendationCandidate[];
 }
 
+export interface EpisodeParseSummary {
+  source_name: string;
+  status: "valid" | "failed";
+  episode_id: string | null;
+  episode_number: number | null;
+  event_count: number;
+  scoring_event_count: number;
+  last_timestamp_ms: number | null;
+  unresolved_aliases: string[];
+  alias_analysis_available: boolean;
+  warning_count: number;
+  warnings: string[];
+  error: string | null;
+  error_line: number | null;
+}
+
+export interface BatchParseValidationResponse {
+  file_count: number;
+  valid_count: number;
+  failed_count: number;
+  total_event_count: number;
+  total_scoring_event_count: number;
+  alias_analysis_available: boolean;
+  episodes: EpisodeParseSummary[];
+}
+
 export interface Settings {
   model: string;
   apiBaseUrl: string;
@@ -274,4 +300,78 @@ export interface EvaluationSessionReport {
       system_count: number;
     };
   };
+}
+
+export interface DemoScoreCandidateInput {
+  candidate_id: string;
+  episode: string;
+  start_clock: string;
+  end_clock: string;
+  duration_seconds: number;
+  hook_line: string;
+  cliffhanger_line: string;
+  transcript_lines: Array<{
+    speaker: string | null;
+    text: string;
+    start_clock: string;
+    end_clock: string;
+  }>;
+}
+
+export interface DemoScorePromptRequest {
+  show_title: string;
+  language: string;
+  target_audience: string | null;
+  candidates: DemoScoreCandidateInput[];
+}
+
+export interface DemoScorePromptResponse {
+  prompt: string;
+  response_schema: Record<string, unknown>;
+  prompt_sha256: string;
+}
+
+export interface DemoModelScore {
+  candidate_id: string;
+  hook: number;
+  cliffhanger: number;
+  standalone: number;
+  why_it_works: string;
+}
+
+export interface DemoScoreResponse {
+  provider: string;
+  model: string;
+  model_calls: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  latency_ms: number;
+  retries: number;
+  estimated_cost: number | null;
+  prompt_sha256: string;
+  raw_response: string;
+  scores: DemoModelScore[];
+}
+
+export interface DemoScoreRunRequest extends DemoScorePromptRequest {
+  model: {
+    provider: "gemini" | "openai" | "no-api";
+    model: string;
+    base_url: string;
+    api_key?: string;
+    temperature: number;
+    max_tokens: number;
+  };
+  manual_payload?: string;
+}
+
+export interface BackendHealthResponse {
+  status: "ok";
+  service: string;
+  version: string;
+  environment: string;
+  model_provider: string;
+  model: string;
+  provider_ready: boolean;
+  configuration_warnings: string[];
 }

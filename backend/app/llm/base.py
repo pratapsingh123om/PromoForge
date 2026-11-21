@@ -25,6 +25,7 @@ class StructuredGeneration(Generic[SchemaT]):
     value: SchemaT
     usage: ProviderUsage
     raw_output: dict[str, Any]
+    raw_text: str | None = None
 
 
 class LLMProvider(ABC):

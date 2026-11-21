@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.engines.aliases import canonicalize_speaker, extract_alias_map, find_unresolved_aliases
 from app.engines.promos import rank_promos_globally
-from app.llm.dispatcher import ModelConfig, call_llm
+from app.llm.dispatcher import ModelConfig, OpenAICompatibleProvider, call_llm
+from app.schemas.demo import DemoScoringPayload
 from app.schemas.narrative import EpisodeNarrativeAnalysis
 
 
@@ -95,5 +98,62 @@ def test_call_llm_fallback_dispatcher():
     assert isinstance(result.value, EpisodeNarrativeAnalysis)
     assert result.value.episode_id == "EP_TEST"
     assert len(result.value.analyses) == 1
+
+
+def test_openai_compatible_adapter_sends_config_and_preserves_raw_json(monkeypatch):
+    raw_json = (
+        '{"scores":[{"candidate_id":"C1","hook":81,"cliffhanger":88,'
+        '"standalone":76,"why_it_works":"A direct accusation opens a mystery."}]}'
+    )
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = raw_json
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": raw_json}}],
+                "usage": {"prompt_tokens": 90, "completion_tokens": 30},
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, payload=json)
+            return FakeResponse()
+
+    monkeypatch.setattr("app.llm.dispatcher.httpx.AsyncClient", FakeAsyncClient)
+    provider = OpenAICompatibleProvider(
+        model="interview-model",
+        base_url="https://example.test/v1",
+        api_key="test-key",
+        temperature=0.25,
+        max_tokens=777,
+    )
+
+    result = asyncio.run(
+        provider.generate_structured(
+            prompt="Score candidate C1",
+            response_schema=DemoScoringPayload,
+        )
+    )
+
+    assert captured["url"] == "https://example.test/v1/chat/completions"
+    assert captured["payload"]["model"] == "interview-model"
+    assert captured["payload"]["temperature"] == 0.25
+    assert captured["payload"]["max_tokens"] == 777
+    assert result.raw_text == raw_json
+    assert result.usage.input_tokens == 90
+    assert result.usage.output_tokens == 30
+    assert result.value.scores[0].candidate_id == "C1"
 
 

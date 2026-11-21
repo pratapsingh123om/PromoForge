@@ -3,6 +3,7 @@ import type {
   BackendEpisode,
   BackendProject,
   BackendPromoCandidate,
+  BatchParseValidationResponse,
   PromoRecommendationResponse,
   EvaluationReadyItem,
   EvaluationSessionReport,
@@ -12,6 +13,11 @@ import type {
   ReviewAssignment,
   ReviewDecision,
   RubricScores,
+  DemoScorePromptRequest,
+  DemoScorePromptResponse,
+  DemoScoreRunRequest,
+  DemoScoreResponse,
+  BackendHealthResponse,
 } from "../types";
 
 const wait = (ms = 260) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,7 +32,8 @@ function backendBaseUrl() {
   } catch {
     // Fall through to the environment/default URL.
   }
-  const base = (configured || "http://127.0.0.1:8000").replace(/\/$/, "");
+  if (!configured) return "/api";
+  const base = configured.replace(/\/$/, "");
   return base.endsWith("/api") ? base : `${base}/api`;
 }
 
@@ -53,6 +60,32 @@ async function backendRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 // Frontend contract mirrors the planned FastAPI resources.
 export const api = {
+  async health(): Promise<BackendHealthResponse> {
+    return backendRequest("/health");
+  },
+  async createDemoScoringPrompt(
+    payload: DemoScorePromptRequest,
+  ): Promise<DemoScorePromptResponse> {
+    return backendRequest("/demo/scoring/prompt", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async runDemoScoring(payload: DemoScoreRunRequest): Promise<DemoScoreResponse> {
+    return backendRequest("/demo/scoring/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  async validateScreenplayFiles(
+    files: File[],
+    language: string,
+  ): Promise<BatchParseValidationResponse> {
+    const form = new FormData();
+    files.forEach((file) => form.append("files", file, file.name));
+    form.append("language", language);
+    return backendRequest("/ingestion/files/validate", { method: "POST", body: form });
+  },
   async listProjects(): Promise<BackendProject[]> {
     return backendRequest("/projects");
   },

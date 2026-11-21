@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "audit:frontend-parser": "tsc src/services/screenplayEngine.ts --target ES2020 --module ES2020 --moduleResolution bundler --outDir node_modules/.cache/promoforge-audit --skipLibCheck && node scripts/audit_frontend_parser.mjs",
+    "test:predeploy": "node scripts/generate_predeploy_fixtures.mjs && tsc -p tsconfig.predeploy.json && node scripts/run_predeploy_gate.mjs"
   },
   "dependencies": {
     "lucide-react": "1.74.0",

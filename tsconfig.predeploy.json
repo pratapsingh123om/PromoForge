@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "bundler",
+    "rootDir": "src",
+    "outDir": "node_modules/.cache/promoforge-predeploy",
+    "skipLibCheck": true,
+    "esModuleInterop": true
+  },
+  "include": [
+    "src/config.ts",
+    "src/services/screenplayEngine.ts",
+    "src/services/demoRun.ts"
+    ,"src/services/uploadValidation.ts"
+  ]
+}
+

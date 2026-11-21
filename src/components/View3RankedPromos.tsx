@@ -21,12 +21,26 @@ import {
   HelpCircle,
   Film,
 } from "lucide-react";
-import type { PromoCandidateItem } from "../services/screenplayEngine";
+import {
+  adjustPromoCandidate,
+  clock,
+  type ParsedEpisode,
+  type PromoCandidateItem,
+} from "../services/screenplayEngine";
+import { PRODUCT_NAME } from "../config";
+import {
+  createRunExportFiles,
+  createStoredZip,
+  screenplayClockToEdl,
+  type DemoRunRecord,
+} from "../services/demoRun";
 
 interface View3Props {
   promos: PromoCandidateItem[];
+  episodes: ParsedEpisode[];
   whyTop3: string[];
   showTitle: string;
+  runRecord: DemoRunRecord | null;
   onUpdatePromoStatus: (
     promoId: string,
     status: PromoCandidateItem["status"],
@@ -38,8 +52,10 @@ interface View3Props {
 
 export function View3RankedPromos({
   promos,
+  episodes,
   whyTop3,
   showTitle,
+  runRecord,
   onUpdatePromoStatus,
   onAdjustPromoBoundaries,
   showToast,
@@ -56,8 +72,8 @@ export function View3RankedPromos({
 
   // Adjust modal state
   const [adjustingPromo, setAdjustingPromo] = useState<PromoCandidateItem | null>(null);
-  const [adjStartSec, setAdjStartSec] = useState<number>(0);
-  const [adjEndSec, setAdjEndSec] = useState<number>(0);
+  const [adjStartMs, setAdjStartMs] = useState<number>(0);
+  const [adjEndMs, setAdjEndMs] = useState<number>(0);
 
   const episodesList = useMemo(() => {
     return Array.from(new Set(promos.map((p) => p.episode))).sort();
@@ -87,6 +103,22 @@ export function View3RankedPromos({
     [promos]
   );
 
+  const adjustingEpisode = useMemo(
+    () => episodes.find((episode) => episode.episode_id === adjustingPromo?.episode) || null,
+    [episodes, adjustingPromo],
+  );
+  const boundaryEvents = useMemo(
+    () =>
+      adjustingEpisode?.events.filter(
+        (event) => event.type === "dialogue" || event.type === "action",
+      ) || [],
+    [adjustingEpisode],
+  );
+  const adjustmentErrors = useMemo(() => {
+    if (!adjustingPromo || !adjustingEpisode) return ["Episode source is not available for this stored result."];
+    return adjustPromoCandidate(adjustingPromo, adjustingEpisode, adjStartMs, adjEndMs).errors;
+  }, [adjustingPromo, adjustingEpisode, adjStartMs, adjEndMs]);
+
   const toggleTranscript = (id: string) => {
     setExpandedTranscripts((prev) => ({ ...prev, [id]: !prev[id] }));
   };
@@ -104,38 +136,67 @@ export function View3RankedPromos({
     showToast({ message: `Downloaded ${filename}`, type: "success" });
   };
 
+  const downloadBlob = (filename: string, blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+    showToast({ message: `Downloaded ${filename}`, type: "success" });
+  };
+
+  const exportFullRunZip = () => {
+    if (!runRecord) {
+      showToast({ message: "Run metadata is unavailable. Run the pipeline again before exporting a ZIP.", type: "warning" });
+      return;
+    }
+    const files = createRunExportFiles(runRecord, promos, whyTop3);
+    downloadBlob(`${runRecord.run_id}.zip`, createStoredZip(files));
+  };
+
   const exportMasterCsv = () => {
-    const headers = "promo_id,global_rank,episode,start,end,duration_seconds,score,hook_line,cliffhanger_line,why_it_works,status\n";
-    const rows = promos.map((p) => {
+    const headers = "promo_id,global_rank,segment_index,episode,start,end,duration_seconds,hook_line,cliffhanger_line,why_it_works,flags,status\n";
+    const rows = promos.flatMap((p) => {
       const why = p.why_it_works.replace(/"/g, '""');
       const hook = p.hook_line.replace(/"/g, '""');
       const cliff = p.cliffhanger_line.replace(/"/g, '""');
-      return `"${p.candidate_key}",${p.global_rank},"${p.episode}","${p.start_clock}","${p.end_clock}",${p.duration_seconds},${p.scores.decision},"${hook}","${cliff}","${why}","${p.status}"`;
+      const flags = p.quality_flags.join(" | ").replace(/"/g, '""');
+      return p.segments.map((segment, index) =>
+        `"${p.candidate_key}",${p.global_rank},${index + 1},"${segment.episode}","${segment.start_clock}","${segment.end_clock}",${segment.duration_seconds},"${hook}","${cliff}","${why}","${flags}","${p.status}"`,
+      );
     }).join("\n");
     downloadFile("promos_master.csv", headers + rows, "text/csv");
   };
 
   const exportCutListCsv = () => {
-    const headers = "promo_id,episode,in_time,out_time,duration_seconds\n";
-    const rows = promos.map((p) => `"${p.candidate_key}","${p.episode}","${p.start_clock}","${p.end_clock}",${p.duration_seconds}`).join("\n");
+    const headers = "promo_id,segment_index,episode,in_time,out_time,duration_seconds\n";
+    const rows = promos.flatMap((p) =>
+      p.segments.map((segment, index) =>
+        `"${p.candidate_key}",${index + 1},"${segment.episode}","${segment.start_clock}","${segment.end_clock}",${segment.duration_seconds}`,
+      ),
+    ).join("\n");
     downloadFile("cut_list.csv", headers + rows, "text/csv");
   };
 
   const exportPromosJson = () => {
     const data = {
-      product: "PromoForge",
+      product: PRODUCT_NAME,
       show_title: showTitle,
       export_timestamp: new Date().toISOString(),
       accepted_promos_count: acceptedCount,
       total_promos_count: promos.length,
       why_top_3_ranking: whyTop3,
       promos: promos,
+      run: runRecord,
     };
     downloadFile("promos.json", JSON.stringify(data, null, 2), "application/json");
   };
 
   const exportReportMd = () => {
-    let md = `# PromoForge Editorial Production Report\n\n`;
+    let md = `# ${PRODUCT_NAME} Editorial Production Report\n\n`;
     md += `**Series:** ${showTitle}  \n`;
     md += `**Total Candidates Ranked:** ${promos.length}  \n`;
     md += `**Approved for Production:** ${acceptedCount}  \n\n`;
@@ -153,37 +214,36 @@ export function View3RankedPromos({
   };
 
   const exportEdl = () => {
-    let edl = `TITLE: PROMOFORGE_CUTS\nFCM: NON-DROP FRAME\n\n`;
-    promos.forEach((p, idx) => {
-      const s = p.start_clock.replace(".", ":") + ":00";
-      const e = p.end_clock.replace(".", ":") + ":00";
-      edl += `${(idx + 1).toString().padStart(3, "0")}  AX       V     C        ${s} ${e} ${s} ${e}\n`;
-      edl += `* FROM CLIP NAME: ${p.candidate_key} (${p.episode})\n\n`;
+    let edl = `TITLE: ${PRODUCT_NAME.toUpperCase()}_CUTS\nFCM: NON-DROP FRAME\n\n`;
+    let eventIndex = 1;
+    promos.forEach((p) => {
+      p.segments.forEach((segment) => {
+        const start = screenplayClockToEdl(segment.start_clock);
+        const end = screenplayClockToEdl(segment.end_clock);
+        edl += `${String(eventIndex).padStart(3, "0")}  AX       V     C        ${start} ${end} ${start} ${end}\n`;
+        edl += `* SCREENPLAY-ONLY PLAN: ${p.candidate_key} (${segment.episode})\n\n`;
+        eventIndex += 1;
+      });
     });
     downloadFile("promos.edl", edl, "text/plain");
   };
 
   const openAdjustModal = (p: PromoCandidateItem) => {
     setAdjustingPromo(p);
-    setAdjStartSec(p.segments[0].start_ms / 1000);
-    setAdjEndSec(p.segments[0].end_ms / 1000);
+    setAdjStartMs(p.segments[0].start_ms);
+    setAdjEndMs(p.segments[0].end_ms);
   };
 
   const saveAdjustment = () => {
     if (!adjustingPromo) return;
-    if (adjEndSec <= adjStartSec) {
-      showToast({ message: "Out-point must be strictly after in-point.", type: "warning" });
-      return;
-    }
-    const dur = adjEndSec - adjStartSec;
-    if (dur < 20 || dur > 60) {
-      showToast({ message: `Duration (${dur.toFixed(1)}s) must remain within 20-60s range.`, type: "warning" });
+    if (adjustmentErrors.length > 0) {
+      showToast({ message: adjustmentErrors[0], type: "warning" });
       return;
     }
     onAdjustPromoBoundaries(
       adjustingPromo.id,
-      Math.round(adjStartSec * 1000),
-      Math.round(adjEndSec * 1000)
+      adjStartMs,
+      adjEndMs,
     );
     setAdjustingPromo(null);
     showToast({ message: "Saved line-adjusted cut boundaries.", type: "success" });
@@ -215,6 +275,15 @@ export function View3RankedPromos({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={exportFullRunZip}
+              disabled={!runRecord}
+              className="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 text-neutral-950 text-xs font-semibold border border-amber-400 flex items-center gap-1.5 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Download size={13} />
+              Full Run ZIP
+            </button>
             <button
               type="button"
               onClick={exportMasterCsv}
@@ -257,7 +326,24 @@ export function View3RankedPromos({
             </button>
           </div>
         </div>
+        <p className="mt-3 text-[11px] text-neutral-500">
+          Exports are generated in this browser from the stored current run. Downloaded files persist on your device; the app keeps run data only in this tab's session storage.
+        </p>
       </div>
+
+      {runRecord?.status === "partial_model_failure" && (
+        <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-200">
+          <b className="block text-red-300">Model scoring did not complete.</b>
+          These are retained rule-based shortlist results, not output from the selected model.
+          {runRecord.errors[0] ? ` ${runRecord.errors[0]}` : ""}
+        </div>
+      )}
+
+      {runRecord?.status === "cancelled" && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200">
+          This run was cancelled. Only candidates completed before cancellation are shown.
+        </div>
+      )}
 
       {/* "Why this ranking" Panel (DEMO.md Section 4 View 3) */}
       {whyTop3.length > 0 && (
@@ -326,8 +412,9 @@ export function View3RankedPromos({
           >
             <option value="all">All Quality Flags</option>
             <option value="clean">Clean (No flags)</option>
-            <option value="needs_context">Needs Context</option>
-            <option value="spoiler_risk">Spoiler Risk</option>
+            <option value="needs context">Needs Context</option>
+            <option value="possible fake cliffhanger">Possible Fake Cliffhanger</option>
+            <option value="soft hook">Soft Hook</option>
           </select>
         </div>
 
@@ -352,7 +439,9 @@ export function View3RankedPromos({
       <div className="space-y-4">
         {filteredPromos.length === 0 ? (
           <div className="p-8 text-center text-xs text-neutral-500 bg-neutral-900 border border-neutral-800 rounded-xl">
-            No promos match the current filters.
+            {promos.length === 0 && runRecord?.status === "complete" ? (
+              <><b className="mb-1 block text-sm text-amber-300">No promo found</b>No source-grounded window satisfied the selected 20–60 second duration and line-boundary rules. Nothing was forced into the ranking.</>
+            ) : "No promos match the current filters."}
           </div>
         ) : (
           filteredPromos.map((promo) => {
@@ -508,6 +597,10 @@ export function View3RankedPromos({
                         <span className="text-base font-bold text-amber-400 font-mono">
                           {promo.scores.decision} / 100
                         </span>
+                      </div>
+
+                      <div className="mb-2 text-[10px] uppercase tracking-wider text-neutral-500">
+                        Scored by {promo.score_source || "legacy/unknown"}
                       </div>
 
                       <div className="space-y-1.5 text-neutral-400">
@@ -673,58 +766,65 @@ export function View3RankedPromos({
               Adjust Cut Boundaries ({adjustingPromo.candidate_key})
             </h3>
             <p className="text-xs text-neutral-400">
-              Fine-tune in-point and out-point. Sliders snap to whole line boundary timestamps 
-              and re-verify the 20-60s duration constraint.
+              Select real dialogue or action boundaries. Duration, sentence-fragment, and
+              continuing-speaker checks run before the cut can be saved.
             </p>
 
             <div className="space-y-4 pt-2">
               <div>
                 <div className="flex justify-between text-xs text-neutral-300 mb-1">
-                  <span>In-Point: {adjStartSec.toFixed(1)}s</span>
+                  <span>In-Point</span>
                   <span className="font-mono text-amber-400">
-                    {Math.floor(adjStartSec / 60)}:{(adjStartSec % 60).toFixed(1).padStart(4, "0")}
+                    {clock(adjStartMs)}
                   </span>
                 </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(0, adjEndSec - 20)}
-                  step={0.5}
-                  value={adjStartSec}
-                  onChange={(e) => setAdjStartSec(parseFloat(e.target.value))}
-                  className="w-full accent-amber-500 cursor-pointer"
-                />
+                <select
+                  value={adjStartMs}
+                  onChange={(event) => setAdjStartMs(Number(event.target.value))}
+                  className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-xs text-neutral-200 focus:border-amber-500 focus:outline-none"
+                >
+                  {boundaryEvents.map((event) => (
+                    <option key={`start-${event.event_id}`} value={event.start_ms}>
+                      {clock(event.start_ms)} · {event.speaker || event.type} · {event.text.slice(0, 72)}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
                 <div className="flex justify-between text-xs text-neutral-300 mb-1">
-                  <span>Out-Point: {adjEndSec.toFixed(1)}s</span>
+                  <span>Out-Point</span>
                   <span className="font-mono text-purple-400">
-                    {Math.floor(adjEndSec / 60)}:{(adjEndSec % 60).toFixed(1).padStart(4, "0")}
+                    {clock(adjEndMs)}
                   </span>
                 </div>
-                <input
-                  type="range"
-                  min={adjStartSec + 20}
-                  max={adjStartSec + 60}
-                  step={0.5}
-                  value={adjEndSec}
-                  onChange={(e) => setAdjEndSec(parseFloat(e.target.value))}
-                  className="w-full accent-purple-500 cursor-pointer"
-                />
+                <select
+                  value={adjEndMs}
+                  onChange={(event) => setAdjEndMs(Number(event.target.value))}
+                  className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-xs text-neutral-200 focus:border-purple-500 focus:outline-none"
+                >
+                  {boundaryEvents.map((event) => (
+                    <option key={`end-${event.event_id}`} value={event.end_ms}>
+                      {clock(event.end_ms)} · {event.speaker || event.type} · {event.text.slice(0, 72)}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800 text-xs flex justify-between items-center">
-                <span className="text-neutral-400">Resulting Cut Duration:</span>
-                <span
-                  className={`font-bold font-mono text-sm ${
-                    adjEndSec - adjStartSec >= 20 && adjEndSec - adjStartSec <= 60
-                      ? "text-emerald-400"
-                      : "text-red-400"
-                  }`}
-                >
-                  {(adjEndSec - adjStartSec).toFixed(1)}s (Valid: 20–60s)
-                </span>
+              <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800 text-xs space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-neutral-400">Resulting Cut Duration:</span>
+                  <span className={`font-bold font-mono text-sm ${adjustmentErrors.length === 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {((adjEndMs - adjStartMs) / 1000).toFixed(1)}s
+                  </span>
+                </div>
+                {adjustmentErrors.length === 0 ? (
+                  <p className="text-emerald-400">All live boundary checks pass.</p>
+                ) : (
+                  <ul className="list-disc pl-4 text-red-300 space-y-1">
+                    {adjustmentErrors.map((error) => <li key={error}>{error}</li>)}
+                  </ul>
+                )}
               </div>
             </div>
 
@@ -739,7 +839,8 @@ export function View3RankedPromos({
               <button
                 type="button"
                 onClick={saveAdjustment}
-                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-semibold text-xs cursor-pointer shadow-md"
+                disabled={adjustmentErrors.length > 0}
+                className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-semibold text-xs cursor-pointer shadow-md disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Save Line-Snapped Cut
               </button>

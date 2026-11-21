@@ -8,6 +8,17 @@ Deterministic code enforces hard timing constraints, dialogue integrity, and ran
 
 ## Quick Start (Single-Command Run)
 
+### Install once
+
+```powershell
+pnpm install
+python -m venv backend/.venv
+.\backend\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
+Copy-Item backend/.env.example backend/.env
+```
+
+On macOS/Linux, activate `backend/.venv` and use its `python`/`pip` equivalents. A Gemini key is optional because the invented sample and rule-only mode run offline.
+
 ### 1. Run the Entire 50-Episode Batch Pipeline
 To analyze all 50 episodes and export raw cut sheets (JSON, CSV, TXT, OTIO) in one command:
 
@@ -25,7 +36,7 @@ python run_batch.py --episode EP_002
 - **Backend API**:
   ```bash
   cd backend
-  uvicorn app.main:app --port 8000 --reload
+  .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000 --reload
   ```
 - **Frontend App**:
   ```bash
@@ -47,7 +58,54 @@ LLM_MODEL=gemini-3.1-flash-lite
 GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-When no API key is present or when running offline, PromoForge automatically falls back to the deterministic `RuleBasedNarrativeProvider` with zero data loss or downtime.
+The four-view frontend supports four scorer modes from `src/config.ts`:
+
+- **Gemini:** schema-validated through the backend; the key may come from `backend/.env` or the in-memory browser field.
+- **OpenAI-compatible:** change base URL, model, and key in the run panel; the adapter uses the standard `/chat/completions` JSON response shape.
+- **No-API:** copy the generated prompt to any model, paste its JSON response, and continue after schema and candidate-ID validation.
+- **Rule-only:** an offline, explicitly lower-quality fallback.
+
+Provider failures are shown as partial runs. PromoForge never silently substitutes rule scores after a model provider was selected.
+
+API keys belong in `backend/.env`, never in committed files. The browser key field remains in React memory only, is sent to the configured local backend for that request, and is not written to local storage, exports, or logs.
+
+### One-project Vercel deployment
+
+`vercel.json` deploys the Vite frontend and FastAPI backend as two services inside one Vercel project and one public domain. Browser requests use `/api`, so production does not depend on a localhost URL or cross-origin configuration.
+
+Configure these Vercel environment variables for Production and Preview:
+
+```env
+PROMOFORGE_ENV=production
+LLM_PROVIDER=gemini
+LLM_MODEL=gemini-3.1-flash-lite
+GEMINI_API_KEY=your_key_here
+PROVIDER_TIMEOUT_SECONDS=50
+```
+
+Then deploy from the repository root:
+
+```bash
+npx vercel@latest
+npx vercel@latest --prod
+```
+
+For local development, the backend port is controlled by `PROMOFORGE_PORT`; the frontend port is controlled by `PORT`. If either default port is busy, set a different value before starting that process. Install `backend/requirements-dev.txt` when running migrations or tests; `backend/requirements.txt` is the production runtime set.
+
+### Current demo status
+
+The verified frontend path is:
+
+1. Load one or more timestamped `.txt` screenplays, or the invented sample.
+2. Inspect the parse summary and explicit per-file errors.
+3. Choose Gemini, OpenAI-compatible, no-API JSON paste, or offline rule-only scoring.
+4. Review exactly three globally ranked promos with one evidence-grounded hook, cliffhanger, and reason each; rank #1 is the recommended choice for downstream production.
+5. Optionally accept, reject, or adjust a cut on real line boundaries.
+6. Download individual artifacts or a stored-run ZIP containing CSV, JSON, Markdown, EDL, `run_log.json`, timeline notes, and the exact raw model response when a model was called.
+
+Verified on 2026-11-21: the current client parser handled all 50 ignored local screenplay files with no silent skips, the invented sample completed live in Gemini and no-API modes, and the generated ZIP passed an independent archive integrity check. Run `pnpm audit:frontend-parser` to repeat the structural audit without printing screenplay text.
+
+See `PROGRESS.md` for the distinction between verified, partial, and open checkpoints. Gold-set quality metrics remain **Not measured** until the labels are confirmed as user-authored and the evaluation script is rerun.
 
 ---
 
@@ -63,21 +121,15 @@ When no API key is present or when running offline, PromoForge automatically fal
 
 ---
 
-## Where the AI Picks Badly (Real Failure Modes & Guardrails)
+## Where the AI Picks Badly (Invented Examples & Guardrails)
 
-During initial runs, pure LLM generation and naive time-window searches exhibited three critical failure modes that PromoForge specifically prevents:
+The invented fixtures reproduce three common editorial failure modes without exposing private screenplay text:
 
-1. **Silent Camera Openings (The "Dead Air" Hook Failure)**:
-   - *Example:* In Episode 1 (`00:00.00`–`00:11.30`), the script opens with establishing camera moves inside the chapel. A naive 30-second window starting at `00:00.00` yields 11 seconds of dead silence before any line is spoken. On TikTok, 11 seconds of silent camera work causes immediate drop-off.
-   - *PromoForge Guardrail:* Hooks are restricted to verified dialogue or high-intensity action events. Episode 1's winning cut starts at `00:33.80` or `00:11.30` ("You should turn around, Juliana."), ensuring an active hook within the first 3 seconds.
+1. **Dead-air openings:** a naive fixed window can begin on camera direction before anyone speaks. Hooks are therefore restricted to verified dialogue or high-intensity action evidence.
+2. **Mid-line dialogue slicing:** fixed-duration windows can cut a speaker mid-sentence. Every boundary is snapped to a parsed event boundary and revalidated after manual adjustment.
+3. **Cliffhanger resolution leakage:** a cut can continue into the answer to its own mystery. Candidate generation penalizes or rejects windows that immediately resolve the final curiosity gap.
 
-2. **Mid-Line Dialogue Slicing**:
-   - *Example:* A standard 40-second fixed window ending at `00:30.00` in Episode 2 cut Juliana's line mid-sentence: `"Father..."` was truncated before her plea was completed.
-   - *PromoForge Guardrail:* Candidates strictly lock their in- and out-points to parser event boundaries. `validate_candidate()` asserts that neither the start nor end boundary slices an active event (`event.start_ms < boundary < event.end_ms`).
-
-3. **Cliffhanger Resolution Leakage**:
-   - *Example:* In Episode 1, if a promo extends past `01:14.30`, it includes the groom's admission of his affair with Juliana's sister. This resolves the central curiosity gap too early, eliminating the viewer's motive to watch the full episode.
-   - *PromoForge Guardrail:* Events identified as `resolves_question = True` immediately invalidate a candidate if included in the cliffhanger beat, guaranteeing the promo ends on an unresolved question or threat.
+See [CONTENT_NOTICE.md](CONTENT_NOTICE.md) for the data and screenplay exclusion notice.
 
 ---
 
