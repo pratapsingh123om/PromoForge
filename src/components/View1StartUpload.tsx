@@ -112,7 +112,7 @@ export function View1StartUpload({
           }
           archiveTitle ||= file.name.replace(/\.zip$/i, "").trim();
           entries.forEach((entry) => {
-            selectedFiles.push(new File([entry.bytes], entry.name, { type: "text/plain" }));
+            selectedFiles.push(new File([entry.bytes.buffer as ArrayBuffer], entry.name, { type: "text/plain" }));
           });
         } catch {
           failures.push({ source_name: file.name, message: "ZIP could not be opened. Upload a valid archive containing UTF-8 .txt episodes.", line_number: null });

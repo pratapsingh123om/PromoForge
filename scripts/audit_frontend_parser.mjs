@@ -55,6 +55,7 @@ for (const file of files) {
     });
   }
 }
+summary.candidates_accepted = candidates.length;
 
 const episodesById = new Map(episodes.map((episode) => [episode.episode_id, episode]));
 let invalidBoundaryCount = 0;

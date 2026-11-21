@@ -51,7 +51,7 @@ interface CharacterProfile {
   spokenMs: number;
 }
 
-const CHARACTER_PALETTES = [
+export const CHARACTER_PALETTES = [
   ["#f59e0b", "#ef4444", "#451a03"],
   ["#8b5cf6", "#ec4899", "#2e1065"],
   ["#06b6d4", "#3b82f6", "#082f49"],
@@ -62,11 +62,11 @@ const CHARACTER_PALETTES = [
   ["#84cc16", "#22c55e", "#1a2e05"],
 ] as const;
 
-function characterSeed(name: string) {
+export function characterSeed(name: string) {
   return Array.from(name).reduce((total, character) => ((total * 31) + character.charCodeAt(0)) >>> 0, 7);
 }
 
-function characterInitials(name: string) {
+export function characterInitials(name: string) {
   return name
     .split(/\s+/)
     .filter(Boolean)
