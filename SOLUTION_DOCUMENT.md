@@ -34,7 +34,8 @@ PromoForge separates deterministic mechanics from semantic interpretation:
 │  • Continuation Suppression (No promo answers another promo's query)   │
 │  • Proportional Series Adjustment (+5 first 30%, -6 last 20%)          │
 └─────────────────────────────────┬──────────────────────────────────────┘
-                                  │ 153 Stratified Clean Candidates
+                                  │ 146 Stratified Clean Candidates
+                                  │ (153 in initial baseline)
                                   ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                          AI SEMANTIC EVALUATOR                         │
@@ -70,26 +71,28 @@ The engine audited all 50 screenplay files (3,727 total timestamped events) and 
 - **Raw Pairs Examined:** 19,046
 - **Duration Filter (< 20s or > 60s):** -7,167 rejected
 - **Dialogue Slice Filter (boundary cuts inside spoken dialogue):** -996 rejected
-- **Valid Formed Windows:** 10,883 clean temporal windows
+- **Valid Formed Windows:** 10,883 clean temporal windows ($19{,}046 - 7{,}167 - 996 = 10{,}883$)
 - **Overlap De-duplication (suppressed by higher-scoring window):** -9,754 suppressed
 - **Continuation Spoiler Suppression (ends/starts on resolved question):** -983 suppressed
-- **Episode Variety Cap (max 3–5 per episode):** -1 suppressed
-- **Stratified Shortlist Pool:** **146 candidates** across all 50 episodes. Exact 100% mathematical reconciliation.
+- **Episode Variety Cap Drop:** -0 suppressed
+- **Stratified Shortlist Pool:** **146 clean accepted candidates** across all 50 episodes ($10{,}883 - 9{,}754 - 983 - 0 = 146$). Exact 100% mathematical reconciliation.
+*(Note on funnel evolution: In the initial baseline run prior to the 4.0s duplicate fix, overlap suppression was 9,985, continuation was 744, and cap drop was 1, accepting 153 candidates: $10{,}883 - 9{,}985 - 744 - 1 = 153$. The tightened $\ge 4.0$s duplicate suppression and soft damping refined the accepted pool to 146 candidates with 0 cap drop).*
 
 ### Inference Cost & Throughput
-Evaluating the stratified shortlist with **Google Gemini 2.5 Flash Lite** in 7 parallel batches:
+Evaluating the stratified shortlist with **Google Gemini (`gemini-3.1-flash-lite`)** in 7 parallel batches:
+- **Model Identifier:** `gemini-3.1-flash-lite` (verified from `run_log.json`)
 - **Total Input Tokens:** 45,558 tokens
 - **Total Output Tokens:** 10,278 tokens
 - **Total Wall Time:** 67.87 seconds
-- **Total API Cost:** **$0.0065** (under seven-tenths of a single cent for the entire 50-episode series).
-- **Extrapolation:** A 1,000-episode series library costs **~$0.13** and processes in under 25 minutes.
+- **Cost Accounting:** Executed under developer free tier ($0 billed). The reported **$0.0065** is an **estimated marginal API cost** calculated from official Gemini Flash Lite pricing ($0.075 / 1M input tokens = $0.0034; $0.30 / 1M output tokens = $0.0031; total = $0.0065 for the entire 50-episode show).
+- **Extrapolation:** A 1,000-episode series library costs an estimated **~$0.13** and processes in under 25 minutes.
 
 ---
 
 ## 4. Quality Evaluation: How I Know It's Good & Where It Fails
 
-### Dual Overlap Evaluation Against Independent Reference
-We evaluated the generated cut sheets against an independently authored set of reference windows (Claude 3.7 Sonnet editorial cut sheets). To prevent cherry-picked metrics, PromoForge reports both lenient and strict evaluation side-by-side:
+### Dual Overlap Evaluation Against Independent Reference Set
+To benchmark performance, we compared the generated cuts against an independently generated reference set produced by an external LLM (Claude 3.7 Sonnet). **Important editorial distinction:** These reference windows are **LLM-generated reference cuts, not human editorial ground truth or a manually labeled gold set**. They serve as an objective cross-model benchmark:
 
 | Episode & Window Target | Reference Start - End | Engine Start - End | Overlap ÷ Shorter (Lenient) | IoU (Strict) | Match Status |
 | :--- | :--- | :--- | :---: | :---: | :---: |

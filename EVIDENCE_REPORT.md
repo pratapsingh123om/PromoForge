@@ -9,7 +9,7 @@
 
 ## 1. One-Paragraph Summary
 
-Problem picked: **Problem 1 (Find the Promos)**. The tool ingests screenplay text files (`.txt`, folders, or `.zip`), parses dialogue and action beats, generates valid candidate windows (20–60s) on exact line boundaries, suppresses dialogue-slicing cuts, overlapping redundant windows, and question-answer continuation spoilers, evaluates candidates via Google Gemini (or offline deterministic rule-scoring), and ranks them globally using a series-acquisition curve with early-episode weighting (+5) and late-series spoiler penalties (-6). The final run processed a 50-episode drama pack (`file_count: 50` in `scripts/audit_frontend_parser.mjs`), examined 19,046 candidate windows (`raw_windows_examined` in `scripts/audit_frontend_parser.mjs`), accepted 153 episode candidates (`episode_shortlist_count` in `scripts/audit_frontend_parser.mjs`), and selected the top 25 global promos across 22 episodes (`ranked_count: 25`, `ranked_episode_counts: 22` in `scripts/audit_frontend_parser.mjs`) with zero dialogue-slice or continuation violations.
+Problem picked: **Problem 1 (Find the Promos)**. The tool ingests screenplay text files (`.txt`, folders, or `.zip`), parses dialogue and action beats, generates valid candidate windows (20–60s) on exact line boundaries, suppresses dialogue-slicing cuts, overlapping redundant windows, and question-answer continuation spoilers, evaluates candidates via Google Gemini (or offline deterministic rule-scoring), and ranks them globally using a series-acquisition curve with early-episode weighting (+5) and late-series spoiler penalties (-6). The final run processed a 50-episode drama pack (`file_count: 50` in `scripts/audit_frontend_parser.mjs`), examined 19,046 candidate windows (`raw_windows_examined` in `scripts/audit_frontend_parser.mjs`), accepted 146 clean episode candidates (153 in initial baseline run; `episode_shortlist_count` in `scripts/audit_frontend_parser.mjs`), and selected the top 25 global promos across 22 episodes (`ranked_count: 25`, `ranked_episode_counts: 22` in `scripts/audit_frontend_parser.mjs`) with zero dialogue-slice or continuation violations.
 
 ---
 
@@ -58,9 +58,10 @@ All metrics below come directly from `outputs/final_run.zip` (`run_log.json` and
   - `rejected_mid_speech` (start events): 352
   - `suppressed_overlap`: 9,985
   - `suppressed_cliffhanger_continuation`: 744
-- **Episode Shortlist Candidates:** 153 clean candidates across 50 episodes (min 1, max 5 per episode; `src/App.tsx:553`)
+- **Episode Shortlist Candidates:** 146 clean candidates across 50 episodes (153 in initial baseline run; min 1, max 5 per episode; `src/App.tsx:553`)
 - **Candidates Scored by Gemini:** 70 (`model_candidates_scored: 70`, capped by `SERIES_MODEL_CANDIDATES = 70` in `demoRun.ts`)
 - **Model Calls:** 7 batches (`model_calls: 7`, 10 candidates per batch)
+- **Model Identifier:** `gemini-3.1-flash-lite` (verified from `run_log.json`)
 - **Input Tokens:** 45,558 (`input_tokens: 45558`)
 - **Output Tokens:** 10,278 (`output_tokens: 10278`)
 - **Wall Time:** 67.87 seconds (`wall_time_seconds: 67.87`)
@@ -70,11 +71,11 @@ All metrics below come directly from `outputs/final_run.zip` (`run_log.json` and
   - Score (Gemini API calls): 52,266 ms
   - Checks & De-conflict: 128 ms
   - Rank & Export: 155 ms
-- **Estimated API Cost:** $0.00 ("free tier; cost not measured")
+- **API Cost Accounting:** $0.00 billed (developer free tier). Estimated marginal cost: **$0.0065** based on official Gemini Flash Lite token pricing ($0.075/1M input, $0.30/1M output).
 - **Final Series Promos Selected:** 25 ranked promos across 22 episodes (`promos.json`)
 
 **Derivation for a new show per week:**  
-At 50 episodes per show, scoring a fixed shortlist of 70 candidates consumes ~45.5k input tokens and ~10.3k output tokens across 7 Gemini Flash Lite calls. Under Google Gemini public pricing ($0.075 / 1M input, $0.30 / 1M output), the marginal API cost is **$0.0065 per show** (~0.65 cents) with a wall-clock execution time of under 70 seconds.
+At 50 episodes per show, scoring a fixed shortlist of 70 candidates consumes ~45.5k input tokens and ~10.3k output tokens across 7 Gemini Flash Lite calls (`gemini-3.1-flash-lite`). Under Google Gemini public pricing ($0.075 / 1M input, $0.30 / 1M output), the estimated marginal API cost is **$0.0065 per show** (~0.65 cents) with a wall-clock execution time of under 70 seconds.
 
 ---
 
@@ -131,8 +132,8 @@ Independent verification script (`scripts/verify_independent_run.mjs`) evaluated
 9. **Rank 9 (EP_012 00:00.00–00:39.40):** Opens on expulsion demand at 00:00.00 (<3s: Yes). Ends on direct threat question (Unresolved: Yes). Standalone: Yes.
 10. **Rank 10 (EP_018 00:12.00–00:51.00):** Opens on arrest warrant (<3s: Yes). Ends on unanswered carriage location question (Unresolved: Yes). Standalone: Yes.
 
-### 6c. Gold-Set Hit Rate
-> Claude wrote reference windows for six episodes (24, 41, 47 with two windows each; 6, 14, 17 with none). One LLM labeller is a weak reference, not an editor's judgment. A window counts as matched if one of the tool's per-episode top 3 overlaps it by at least 50% (intersection over the shorter clip). **5 of 6 windows matched; all three strong episodes had at least one match; the one miss was EP_041 window 1 (9.6% overlap).** Whether quiet episodes 6, 14 and 17 produced no promo: Not measured (the offline rule tool returned 1–2 candidates above 70.0 for each because heuristic scoring lacks semantic romance discernment).
+### 6c. Independent Reference Window Benchmark (Claude LLM-Generated References; Not Human Ground Truth)
+> Claude generated reference windows for six episodes (24, 41, 47 with two windows each; 6, 14, 17 with none). **These are LLM-generated reference cuts, not human editorial ground truth or a manually labelled gold set.** A window counts as matched if one of the tool's per-episode top 3 overlaps it by at least 50% (intersection over the shorter clip). **5 of 6 windows matched; all three strong episodes had at least one match; the one miss was EP_041 window 1 (9.6% overlap).** Whether quiet episodes 6, 14 and 17 produced no promo: Not measured (the offline rule tool returned 1–2 candidates above 70.0 for each because heuristic scoring lacks semantic romance discernment).
 
 **Detailed Metric Comparison:**
 - **Lenient Metric (Intersection over Shorter Clip $\ge 50\%$):** **5 of 6 (83.3%)**
@@ -234,7 +235,7 @@ Real confirmed entries from `FAILURES.md` and codebase git history:
 - **Header:** PromoForge — Automated Screenplay-to-Promo Discovery Pipeline
 - **Problem & Solution:** Finding high-converting 20–60s promotional clips from 50-episode screenplays without human fatigue.
 - **Pipeline Architecture:** Ingestion $\rightarrow$ Dialogue-Slice Rejection $\rightarrow$ Conflict De-duplication $\rightarrow$ Gemini/Rule Scoring $\rightarrow$ Series Acquisition Ranking.
-- **Final Run Metrics:** 50 episodes, 19,046 windows analyzed, 153 shortlisted, 25 ranked promos selected across 22 episodes.
+- **Final Run Metrics:** 50 episodes, 19,046 windows analyzed, 146 clean accepted candidates (153 baseline), 25 ranked promos selected across 22 episodes.
 - **Top Promos Table:** Rank 1–5 summary with exact timestamps, hook line, cliffhanger line, and acquisition score.
 
 ### Page 2: Quality, Failure Log, and Production Integration
@@ -242,4 +243,4 @@ Real confirmed entries from `FAILURES.md` and codebase git history:
 - **Where AI Failed & How We Fixed It:** Sub-second dialogue cuts (F15), question-reply cliffhanger spoilers (F14), and template rationales (F17).
 - **Human in the Loop:** Editor review interface, risk flagging (`Review risk` / `Hold`), and footage conform requirements.
 - **Export Specifications:** Comprehensive export package (EDL, OTIO, CSV, JSON, and `run_log.json`).
-- **Honest Limitations & Next Steps:** Screenplay-only boundaries, unmeasured gold hit rate, and future cross-episode promo capabilities.
+- **Honest Limitations & Next Steps:** Screenplay-only boundaries, LLM reference benchmark (not human ground truth), and future cross-episode promo capabilities.

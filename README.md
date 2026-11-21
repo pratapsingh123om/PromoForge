@@ -68,24 +68,26 @@ Candidates Generated:                  19,046
 Valid Temporal Windows Formed:         10,883
   ├── Suppressed: Overlap De-dup:      -9,754
   ├── Suppressed: Continuation Spoiler:  -983
-  └── Suppressed: Episode Limit:           -1
-Stratified Candidate Pool Accepted:       146 candidates
+  └── Suppressed: Episode Limit Drop:      -0
+Stratified Candidate Pool Accepted:       146 clean candidates
 ```
+*(Funnel reconciliation note: In the initial baseline run prior to the 4.0s duplicate fix, overlap suppression was 9,985, continuation was 744, and cap was 1, accepting 153 candidates: $10{,}883 - 9{,}985 - 744 - 1 = 153$. The tightened $\ge 4.0$s duplicate check refined the accepted pool to 146 candidates with 0 cap drop: $10{,}883 - 9{,}754 - 983 - 0 = 146$).*
 
-### Gemini 2.5 Flash Lite Performance
+### Model Performance (`gemini-3.1-flash-lite`)
+- **Model Identifier:** `gemini-3.1-flash-lite` (verified from `run_log.json`)
 - **Shortlist Scored:** 70 candidates across 50 episodes in 7 parallel batches
 - **Input Tokens:** 45,558 tokens
 - **Output Tokens:** 10,278 tokens
 - **Total Wall Time:** 67.87 seconds
-- **Total API Cost:** **$0.0065** (~$0.00013 per episode)
+- **Cost Accounting:** Run under developer free tier ($0 billed). The reported **$0.0065** is an **estimated marginal API cost** calculated from official Gemini Flash Lite pricing ($0.075 / 1M input, $0.30 / 1M output).
 
 ---
 
-## Quality Evaluation: Dual Overlap Metrics
+## Quality Evaluation: Dual Overlap Metrics Against Independent Reference
 
-To ensure transparent reporting, PromoForge benchmarks against independent reference cut sheets (Claude 3.7 Sonnet) using both lenient and strict evaluation criteria side-by-side:
+To ensure transparent reporting, PromoForge benchmarks against an independently generated reference set (Claude 3.7 Sonnet). **Note:** These are **LLM-generated reference cuts, not human editorial ground truth or a manually labeled gold set**. Both lenient and strict evaluation criteria are reported side-by-side:
 
-| Benchmark Metric | Threshold Criterion | Gold Set Result |
+| Benchmark Metric | Threshold Criterion | Independent Reference Result |
 | :--- | :--- | :---: |
 | **Lenient Overlap** | Overlap $\ge 50\%$ of shorter clip | **5 of 6 (83.3%)** |
 | **Strict Overlap (IoU)** | Temporal Intersection-over-Union $\ge 50\%$ | **4 of 6 (66.7%)** |

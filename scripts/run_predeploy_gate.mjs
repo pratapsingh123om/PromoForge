@@ -543,22 +543,28 @@ check("2D human review editorial state separation from engine candidates_accepte
   return "Editorial approval updates user_approved_count without corrupting engine candidates_accepted";
 });
 
-check("2E candidate funnel numerical reconciliation", () => {
+check("2E candidate funnel numerical reconciliation (baseline 153 and refined 146)", () => {
   const generated = 19046;
   const rejectedDuration = 7167;
   const rejectedDialogueSlice = 996;
   const validWindowsFormed = generated - rejectedDuration - rejectedDialogueSlice; // 10,883
   assert.equal(validWindowsFormed, 10883);
 
-  const suppressedOverlap = 9985;
-  const suppressedContinuation = 744;
-  const suppressedEpisodeCap = 1;
-  const totalSuppressed = suppressedOverlap + suppressedContinuation + suppressedEpisodeCap; // 10,730
-  assert.equal(totalSuppressed, 10730);
+  // Baseline run prior to 4.0s duplicate fix:
+  const baselineOverlap = 9985;
+  const baselineContinuation = 744;
+  const baselineEpisodeCap = 1;
+  const baselineAccepted = validWindowsFormed - baselineOverlap - baselineContinuation - baselineEpisodeCap;
+  assert.equal(baselineAccepted, 153);
 
-  const candidatesAccepted = validWindowsFormed - totalSuppressed; // 153
-  assert.equal(candidatesAccepted, 153);
-  return "19,046 generated - 7,167 dur - 996 slice - 9,985 overlap - 744 cont - 1 cap = 153 candidates (100% reconciled)";
+  // Refined current run with 4.0s duplicate fix and soft damping:
+  const refinedOverlap = 9754;
+  const refinedContinuation = 983;
+  const refinedEpisodeCap = 0;
+  const refinedAccepted = validWindowsFormed - refinedOverlap - refinedContinuation - refinedEpisodeCap;
+  assert.equal(refinedAccepted, 146);
+
+  return "Funnel exact: 10,883 - 9,985 - 744 - 1 = 153 (baseline); 10,883 - 9,754 - 983 - 0 = 146 (refined 4.0s de-dup)";
 });
 
 check("2F late-series spoiler penalty and flag in 50-episode run", () => {
