@@ -98,9 +98,13 @@ const EMPTY_RUN_SUMMARY: RunCheckSummary = {
   rejected_mid_speech: 0,
   suppressed_overlap: 0,
   suppressed_cliffhanger_continuation: 0,
+  suppressed_episode_cap: 0,
   candidates_accepted: 0,
   model_calls: 0,
   wall_time_seconds: 0,
+  user_approved_count: 0,
+  user_rejected_count: 0,
+  user_pending_count: 0,
 };
 
 export default function App() {
@@ -347,6 +351,28 @@ export default function App() {
         0.2 * score.standalone +
         0.1 * durationFit
       ).toFixed(1));
+
+      // Reconcile context evaluation between AI score and heuristic checks
+      const updatedFlags = [...candidate.quality_flags];
+      let contextWarningReason = candidate.context_warning_reason;
+
+      const heuristicHadContextIssue = updatedFlags.includes("needs context");
+      if (score.standalone >= 75 && heuristicHadContextIssue) {
+        // Disagreement: AI rates standalone high (>=75) but heuristic detected pronoun/speaker dependency
+        const flagIdx = updatedFlags.indexOf("needs context");
+        if (flagIdx >= 0) updatedFlags.splice(flagIdx, 1);
+        updatedFlags.push("context review needed");
+        contextWarningReason = `Model rated standalone clarity high (${score.standalone}/100), but heuristic analysis detected pronoun references without introduced antecedents. Flagged for editorial review.`;
+      } else if (score.standalone < 70 && !heuristicHadContextIssue) {
+        // AI flags low standalone despite clean heuristic
+        updatedFlags.push("needs context");
+        contextWarningReason = `Model flagged standalone clarity (${score.standalone}/100), citing missing prior-episode context in narrative reasoning.`;
+      } else if (score.standalone >= 75 && !heuristicHadContextIssue) {
+        // Agreement: clearly standalone
+        const flagIdx = updatedFlags.indexOf("needs context");
+        if (flagIdx >= 0) updatedFlags.splice(flagIdx, 1);
+      }
+
       return {
         ...candidate,
         why_it_works: score.why_it_works,
@@ -356,6 +382,8 @@ export default function App() {
           standalone: score.standalone,
           decision,
         },
+        quality_flags: updatedFlags,
+        context_warning_reason: contextWarningReason,
         score_source: `${response.provider}/${response.model}`,
       };
     });
@@ -880,15 +908,23 @@ export default function App() {
           ? { ...p, status, rejection_reason: rejectionReason }
           : p
       );
+      const approvedCount = next.filter((promo) => promo.status === "approved").length;
+      const rejectedCount = next.filter((promo) => promo.status === "rejected").length;
+      const pendingCount = next.filter((promo) => promo.status === "review" || promo.status === "selected").length;
+
       setRunSummary((summary) => ({
         ...summary,
-        candidates_accepted: next.filter((promo) => promo.status === "approved").length,
+        user_approved_count: approvedCount,
+        user_rejected_count: rejectedCount,
+        user_pending_count: pendingCount,
       }));
       setRunRecord((record) => record ? {
         ...record,
         check_summary: {
           ...record.check_summary,
-          candidates_accepted: next.filter((promo) => promo.status === "approved").length,
+          user_approved_count: approvedCount,
+          user_rejected_count: rejectedCount,
+          user_pending_count: pendingCount,
         },
       } : record);
       return next;

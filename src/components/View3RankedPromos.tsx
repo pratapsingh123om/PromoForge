@@ -732,6 +732,16 @@ export function View3RankedPromos({
                     <AlertTriangle size={11} /> Requires Context
                   </span>
                 )}
+                {promo.quality_flags.includes("context review needed") && (
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-950/60 text-amber-300 border border-amber-500/40 flex items-center gap-1" title={promo.context_warning_reason}>
+                    <AlertTriangle size={11} /> Context Review Needed (AI Disagreement)
+                  </span>
+                )}
+                {promo.segments.length > 1 && (
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-950/60 text-purple-300 border border-purple-500/40">
+                    {promo.segments.length} Segments
+                  </span>
+                )}
                 {isApproved && (
                   <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1">
                     <CheckCircle2 size={12} /> Approved

@@ -18,25 +18,49 @@ export function shortlistCandidatesForModel(
   limit = MAX_MODEL_CANDIDATES,
   perEpisodeLimit = 2,
 ): PromoCandidateItem[] {
-  if (limit <= 0 || perEpisodeLimit <= 0) return [];
-  const episodeCounts = new Map<string, number>();
-  return [...candidates]
-    .sort((left, right) => {
-      const scoreDifference = right.scores.decision - left.scores.decision;
-      if (scoreDifference !== 0) return scoreDifference;
-      const episodeDifference = left.episode.localeCompare(right.episode, undefined, {
-        numeric: true,
-      });
-      if (episodeDifference !== 0) return episodeDifference;
-      return left.candidate_key.localeCompare(right.candidate_key);
-    })
-    .filter((candidate) => {
-      const count = episodeCounts.get(candidate.episode) ?? 0;
-      if (count >= perEpisodeLimit) return false;
-      episodeCounts.set(candidate.episode, count + 1);
-      return true;
-    })
-    .slice(0, limit);
+  if (limit <= 0 || perEpisodeLimit <= 0 || candidates.length === 0) return [];
+
+  // Group candidates by episode, sorting each group internally by decision score
+  const byEpisode = new Map<string, PromoCandidateItem[]>();
+  for (const c of candidates) {
+    const list = byEpisode.get(c.episode) || [];
+    list.push(c);
+    byEpisode.set(c.episode, list);
+  }
+  for (const list of byEpisode.values()) {
+    list.sort((a, b) => {
+      const scoreDiff = b.scores.decision - a.scores.decision;
+      if (scoreDiff !== 0) return scoreDiff;
+      return a.candidate_key.localeCompare(b.candidate_key);
+    });
+  }
+
+  // Episode ordering: numeric order EP_001..EP_050
+  const sortedEpisodes = Array.from(byEpisode.keys()).sort((a, b) => {
+    const numA = parseInt((/(\d+)/.exec(a) || [0, 0])[1] as string, 10);
+    const numB = parseInt((/(\d+)/.exec(b) || [0, 0])[1] as string, 10);
+    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+    return a.localeCompare(b);
+  });
+
+  const shortlisted: PromoCandidateItem[] = [];
+
+  // Stratified round-robin passes to guarantee fair per-episode allocation:
+  // Round 0: 1st candidate from every episode
+  // Round 1: 2nd candidate from every episode
+  // Round 2+: 3rd candidate from every episode up to perEpisodeLimit
+  for (let round = 0; round < perEpisodeLimit; round++) {
+    for (const ep of sortedEpisodes) {
+      if (shortlisted.length >= limit) break;
+      const list = byEpisode.get(ep);
+      if (list && list[round]) {
+        shortlisted.push(list[round]);
+      }
+    }
+    if (shortlisted.length >= limit) break;
+  }
+
+  return shortlisted;
 }
 
 export interface DemoRunRecord {

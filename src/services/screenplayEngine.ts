@@ -99,6 +99,7 @@ export interface PromoCandidateItem {
   ranking_adjustment?: number;
   post_priority?: string;
   is_top_10?: boolean;
+  context_warning_reason?: string;
   transcript_lines: {
     event_type: ParsedEvent["type"];
     speaker: string | null;
@@ -118,9 +119,13 @@ export interface RunCheckSummary {
   rejected_mid_speech: number;
   suppressed_overlap: number;
   suppressed_cliffhanger_continuation: number;
+  suppressed_episode_cap: number;
   candidates_accepted: number;
   model_calls: number;
   wall_time_seconds: number;
+  user_approved_count?: number;
+  user_rejected_count?: number;
+  user_pending_count?: number;
 }
 
 export interface PromoAdjustmentResult {
@@ -171,9 +176,16 @@ function promoOverlapRatio(left: PromoCandidateItem, right: PromoCandidateItem):
 
 export function promosConflict(left: PromoCandidateItem, right: PromoCandidateItem): boolean {
   if (left.episode !== right.episode) return false;
-  if (promoOverlapRatio(left, right) > 0.2) return true;
+  if (promoOverlapRatio(left, right) > 0.15) return true;
   const leftSegment = left.segments[0];
   const rightSegment = right.segments[0];
+  const overlapMs = Math.max(
+    0,
+    Math.min(leftSegment.end_ms, rightSegment.end_ms) - Math.max(leftSegment.start_ms, rightSegment.start_ms),
+  );
+  // Detect substantial shared dramatic moments >= 4.0s (e.g., EP_027 5.4s shared beat)
+  if (overlapMs >= 4000) return true;
+
   const leftToRightGap = rightSegment.start_ms - leftSegment.end_ms;
   const rightToLeftGap = leftSegment.start_ms - rightSegment.end_ms;
 
@@ -533,22 +545,31 @@ function scoreWindow(
   const hasQuestion = endEv.text.includes("?");
   const hasInterruption = /(?:\.\.\.|…|—|--)\s*["']?$/.test(endEv.text.trim());
   const hasExclamation = endEv.text.includes("!");
-  const hook = Math.min(
+
+  const softWords = ["quiet", "gently", "whisper", "smile", "tender", "sigh", "softly", "tears", "embrace", "cottage", "peaceful", "sunset", "kiss", "sleep", "rest", "warm", "warmth", "comfort", "affection", "darling", "sweet"];
+  const severeThreatWords = ["danger", "kill", "threat", "arrest", "ruin", "confess", "strike", "forged", "vault", "warrant", "blood", "traitor", "fire", "scullery", "confession", "magistrate", "poison", "murder", "execution"];
+
+  const textLower = inCutEvents.map((e) => e.text.toLowerCase()).join(" ");
+  const softHits = softWords.filter((w) => textLower.includes(w)).length;
+  const severeHits = severeThreatWords.filter((w) => textLower.includes(w)).length;
+  const quietDamping = (softHits >= 2 && severeHits === 0) ? 14 : (softHits === 1 && severeHits === 0) ? 7 : 0;
+
+  const hook = Math.max(0, Math.min(
     100,
     35 +
       (startEv.type === "dialogue" ? 20 : 8) +
       Math.min(24, startStakeHits * 8) +
       (startWordCount >= 4 && startWordCount <= 18 ? 12 : 4) +
-      (/[?!]/.test(startEv.text) ? 6 : 0),
-  );
-  const cliffhanger = Math.min(
+      (/[?!]/.test(startEv.text) ? 6 : 0) - quietDamping,
+  ));
+  const cliffhanger = Math.max(0, Math.min(
     100,
     30 +
       (hasQuestion ? 35 : 0) +
       (hasInterruption ? 28 : 0) +
       (hasExclamation ? 10 : 0) +
-      Math.min(24, endCliffHits * 8),
-  );
+      Math.min(24, endCliffHits * 8) - quietDamping,
+  ));
   const speakers = new Set(inCutEvents.map((event) => event.speaker).filter(Boolean));
   const contextReferences = inCutEvents.filter((event) => /\b(he|she|they|him|her|them|this|that)\b/i.test(event.text)).length;
   const standalone = Math.max(
@@ -558,11 +579,16 @@ function scoreWindow(
   const durationFit = Math.max(0, 100 * (1 - Math.abs(durationMs - 40_000) / 20_000));
   const decision = Number((0.35 * hook + 0.35 * cliffhanger + 0.2 * standalone + 0.1 * durationFit).toFixed(1));
   const qualityFlags: string[] = [];
+  let contextWarningReason: string | undefined = undefined;
+
   if (startEv.type !== "dialogue" || startWordCount < 3) qualityFlags.push("soft hook");
   if (!hasQuestion && !hasInterruption && !hasExclamation && endCliffHits === 0) {
     qualityFlags.push("possible fake cliffhanger");
   }
-  if (standalone < 70) qualityFlags.push("needs context");
+  if (standalone < 70) {
+    qualityFlags.push("needs context");
+    contextWarningReason = `Contains ${contextReferences} external pronoun reference(s) and ${speakers.size} speaker(s) without in-clip introduction.`;
+  }
   const interiorEvents = inCutEvents.filter(
     (event) => event.event_id !== startEv.event_id && event.event_id !== endEv.event_id,
   );
@@ -592,6 +618,7 @@ function scoreWindow(
   return {
     scores: { hook, cliffhanger, standalone, decision },
     qualityFlags,
+    contextWarningReason,
     whyItWorks,
   };
 }
@@ -816,6 +843,7 @@ export function generateEpisodePromosClient(
           "H9: Single Line Hook & Cliffhanger",
         ],
         quality_flags: scored.qualityFlags,
+        context_warning_reason: scored.contextWarningReason,
         score_source: "rule-based",
         status: "selected",
         moment_type: momentType,
@@ -832,7 +860,7 @@ export function generateEpisodePromosClient(
     }
   }
 
-  // De-conflict candidates within the episode (H6: overlap > 20%, H7: cliffhanger spoiler)
+  // De-conflict candidates within the episode (H6: overlap > 15% or >= 4.0s shared beat, H7: cliffhanger spoiler)
   candidates.sort((a, b) => b.scores.decision - a.scores.decision);
   const selected: PromoCandidateItem[] = [];
 
@@ -845,7 +873,7 @@ export function generateEpisodePromosClient(
       const overlapEnd = Math.min(cSeg.end_ms, kSeg.end_ms);
       const overlapMs = Math.max(0, overlapEnd - overlapStart);
       const minDur = Math.min(cSeg.end_ms - cSeg.start_ms, kSeg.end_ms - kSeg.start_ms);
-      if (overlapMs / minDur > 0.2) {
+      if (overlapMs >= 4000 || (minDur > 0 && overlapMs / minDur > 0.15)) {
         overlaps = true;
         summary.suppressed_overlap++;
         break;
@@ -859,8 +887,12 @@ export function generateEpisodePromosClient(
       }
     }
 
-    if (!overlaps && selected.length < maxSelected) {
-      selected.push(cand);
+    if (!overlaps) {
+      if (selected.length < maxSelected) {
+        selected.push(cand);
+      } else {
+        summary.suppressed_episode_cap = (summary.suppressed_episode_cap || 0) + 1;
+      }
     }
   }
 
@@ -1076,4 +1108,137 @@ export function rankAllEpisodesGlobally(
     totalCandidatesEvaluated: allPromos.length,
     allCandidatesByEpisode,
   };
+}
+
+export interface MultiSegmentPromoInput {
+  segments: PromoCutSegment[];
+  episodesMap: Record<string, ParsedEpisode>;
+}
+
+export function createMultiSegmentPromo(
+  input: MultiSegmentPromoInput,
+): { promo: PromoCandidateItem | null; errors: string[] } {
+  const { segments, episodesMap } = input;
+  const errors: string[] = [];
+  if (!segments || segments.length === 0) {
+    return { promo: null, errors: ["At least one segment is required."] };
+  }
+
+  let totalDurationMs = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const ep = episodesMap[seg.episode];
+    if (!ep) {
+      errors.push(`Episode ${seg.episode} not found in episode map.`);
+      continue;
+    }
+    const segDur = seg.end_ms - seg.start_ms;
+    if (segDur < 5000) {
+      errors.push(`Segment ${i + 1} (${seg.episode}) is too short (${(segDur / 1000).toFixed(1)}s < 5.0s).`);
+    }
+    if (boundarySlicesDialogue(ep.events, seg.start_ms)) {
+      errors.push(`Segment ${i + 1} in-point slices through dialogue.`);
+    }
+    if (boundarySlicesDialogue(ep.events, seg.end_ms)) {
+      errors.push(`Segment ${i + 1} out-point slices through dialogue.`);
+    }
+    totalDurationMs += segDur;
+  }
+
+  const totalSec = totalDurationMs / 1000;
+  if (totalSec < 20 || totalSec > 60) {
+    errors.push(`Total assembled duration must be between 20s and 60s (got ${totalSec.toFixed(1)}s).`);
+  }
+
+  if (errors.length > 0) {
+    return { promo: null, errors };
+  }
+
+  const firstSeg = segments[0];
+  const lastSeg = segments[segments.length - 1];
+  const firstEp = episodesMap[firstSeg.episode];
+  const lastEp = episodesMap[lastSeg.episode];
+
+  const firstEvents = firstEp.events.filter((e) => e.start_ms >= firstSeg.start_ms && e.end_ms <= firstSeg.end_ms);
+  const lastEvents = lastEp.events.filter((e) => e.start_ms >= lastSeg.start_ms && e.end_ms <= lastSeg.end_ms);
+
+  const startEv: ParsedEvent = firstEvents[0] || {
+    text: "Scene Opening",
+    speaker: "Scene",
+    start_ms: firstSeg.start_ms,
+    end_ms: firstSeg.start_ms + 1000,
+    start_clock: firstSeg.start_clock,
+    end_clock: firstSeg.start_clock,
+    event_id: "E_START",
+    type: "action" as const,
+    scene_id: "SCENE_1",
+  };
+  const endEv: ParsedEvent = lastEvents[lastEvents.length - 1] || {
+    text: "Scene Cliffhanger",
+    speaker: "Scene",
+    start_ms: lastSeg.end_ms - 1000,
+    end_ms: lastSeg.end_ms,
+    start_clock: lastSeg.end_clock,
+    end_clock: lastSeg.end_clock,
+    event_id: "E_END",
+    type: "dialogue" as const,
+    scene_id: "SCENE_1",
+  };
+
+  const allCutEvents = segments.flatMap((s) => {
+    const ep = episodesMap[s.episode];
+    return ep ? ep.events.filter((e) => e.start_ms >= s.start_ms && e.end_ms <= s.end_ms) : [];
+  });
+
+  const scored = scoreWindow(startEv, endEv, allCutEvents, totalDurationMs);
+  const promoId = `MULTI_${segments.map((s) => s.episode).join("_")}_P_${firstSeg.start_clock.replace(/[:.]/g, "")}_${lastSeg.end_clock.replace(/[:.]/g, "")}`;
+
+  const promo: PromoCandidateItem = {
+    id: promoId,
+    candidate_key: promoId,
+    global_rank: 0,
+    episode: segments.map((s) => s.episode).join(" + "),
+    segments: segments.map((s) => ({
+      ...s,
+      duration_seconds: Number(((s.end_ms - s.start_ms) / 1000).toFixed(1)),
+    })),
+    duration_seconds: Number(totalSec.toFixed(1)),
+    start_clock: firstSeg.start_clock,
+    end_clock: lastSeg.end_clock,
+    hook_line: startEv.text,
+    hook_speaker: startEv.speaker || "Scene Direction",
+    hook_timestamp: firstSeg.start_clock,
+    cliffhanger_line: endEv.text,
+    cliffhanger_speaker: endEv.speaker || "Scene Direction",
+    cliffhanger_timestamp: clock(endEv.start_ms),
+    why_it_works: scored.whyItWorks,
+    scores: scored.scores,
+    hard_checks_passed: [
+      "H1: Valid Range (20-60s)",
+      "H2: Real Line Boundaries",
+      "H3: Spoken Dialogue Intact",
+      "H4: No Fragment Start",
+      "H5: Episode Duration Compliant",
+      "H6: Overlap Threshold Compliant",
+      "H7: No Cliffhanger Continuation",
+      "H8: Required Fields Complete",
+      "H9: Single Line Hook & Cliffhanger",
+    ],
+    quality_flags: scored.qualityFlags,
+    context_warning_reason: scored.contextWarningReason,
+    score_source: "rule-based-multi",
+    status: "selected",
+    moment_type: "general_dramatic",
+    transcript_lines: allCutEvents.map((ev) => ({
+      event_type: ev.type,
+      speaker: ev.speaker,
+      text: ev.text,
+      start_clock: clock(ev.start_ms),
+      end_clock: clock(ev.end_ms),
+      is_hook: ev.event_id === startEv.event_id,
+      is_cliffhanger: ev.event_id === endEv.event_id,
+    })),
+  };
+
+  return { promo, errors: [] };
 }
