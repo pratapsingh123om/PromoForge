@@ -183,27 +183,31 @@
   </div>
 
   <h2>1. Problem Choice & Operational Framing</h2>
-  <p>I chose <strong>Problem 1 (Find the Promos)</strong> because discovering high-converting promotional cut points is the single most urgent operational bottleneck in vertical drama streaming. While other challenges drift toward speculative end-to-end video synthesis, promo selection is an immediate, business-critical editorial workflow with clear evaluation criteria:</p>
-  
-  <div class="grid-2">
-    <div class="card">
-      <h3>Why Problem 1? (Strategic & Engineering Rationale)</h3>
-      <ul>
-        <li><strong>Immediate Operational Bottleneck:</strong> Editing teams manually comb through hours of episodic drama to find 30&ndash;60s acquisition hooks for TikTok, Reels, and YouTube Shorts under weekly release deadlines.</li>
-        <li><strong>Directly Measurable Business Impact:</strong> Top-of-funnel promo retention and click-through directly drive initial coin unlocks and subscriber acquisition curves.</li>
-        <li><strong>Realistic Series-Scale Verifiability:</strong> The 50 supplied episodes (~3,727 events) permit rigorous full-series stress testing against real-world production scale rather than isolated toy demos.</li>
-        <li><strong>Clean Division of Labor:</strong> High-precision deterministic code guarantees timing and boundary physics, while AI evaluates narrative tension, dramatic pacing, and curiosity gaps.</li>
-        <li><strong>Scoped for Editorial Utility:</strong> Focuses on solving candidate discovery and NLE cut-sheet generation rather than ungrounded &ldquo;virality&rdquo; hype or synthetic video hallucinations.</li>
+  <div class="card" style="margin-bottom: 4px; padding: 5px 8px;">
+    <h3 style="font-size: 8.2pt; margin-top: 1px; margin-bottom: 2px; color: #0f172a;">Why Problem 1? (Operational Relevance, Testability &amp; Separation of Concerns)</h3>
+    <p style="margin-bottom: 3px;">Kuku's assignment describes a recurring editorial workflow: editors manually review episodes to identify promotional moments, while new shows are released weekly. This creates an opportunity to automate candidate discovery without removing editorial judgment. I selected this problem for three reasons:</p>
+    <ul style="margin-bottom: 3px; margin-left: 14px;">
+      <li><strong>Operational relevance:</strong> Promo discovery is a repeated task that can potentially be made more efficient through automation.</li>
+      <li><strong>Testability:</strong> The supplied 50-episode timestamped screenplay pack makes each proposed cut traceable to its source and enables reproducible validation.</li>
+      <li><strong>Natural AI-code separation:</strong> Deterministic code can enforce timing and structural constraints, while an LLM evaluates narrative qualities such as hooks, cliffhangers, and standalone clarity.</li>
+    </ul>
+    <p style="margin-bottom: 1px;">I deliberately scoped PromoForge to finding and ranking promotional moments rather than generating finished advertisements. This allowed me to build and evaluate an end-to-end prototype within the assignment's time constraint, while keeping the final creative decision with human editors.</p>
+  </div>
+
+  <div class="grid-2" style="margin-bottom: 4px; gap: 6px;">
+    <div class="card" style="padding: 4px 7px;">
+      <h3 style="font-size: 7.7pt; margin-top: 1px; margin-bottom: 2px;">Hard Structural Invariants</h3>
+      <ul style="margin-left: 12px; margin-bottom: 1px;">
+        <li><strong>Duration Bounds:</strong> Strictly bounded to 20.0s &ndash; 60.0s total runtime.</li>
+        <li><strong>Timestamped Screenplay-Boundary Validation:</strong> Zero cuts inside spoken lines (&lt;0.1s tolerance against script event clocks; text-only boundary check).</li>
+        <li><strong>Curiosity Hook &amp; Cliffhanger:</strong> Opening hook in first 3.0s; ends on unresolved tension without answering its own premise.</li>
       </ul>
     </div>
-    <div class="card">
-      <h3>Hard Editorial Invariants & Operating Boundaries</h3>
-      <ul>
-        <li><strong>Duration Bounds:</strong> Strictly bounded to 20.0s &ndash; 60.0s total runtime.</li>
-        <li><strong>Dialogue Boundary Validation:</strong> Zero cuts inside spoken lines (&lt;0.1s tolerance against script event clocks; text-only boundary check).</li>
-        <li><strong>Curiosity Hook & Cliffhanger:</strong> Opening hook in first 3.0s; ends on maximum unresolved curiosity/tension without answering its own premise.</li>
-        <li><strong>Confidentiality Guarantee:</strong> Zero proprietary screenplay dialogue committed to public git or leaked to public models.</li>
-        <li><strong>Human-in-the-Loop Workflow:</strong> AI proposes, ranks, and annotates; editors retain final review, boundary trimming, and NLE export control.</li>
+    <div class="card" style="padding: 4px 7px;">
+      <h3 style="font-size: 7.7pt; margin-top: 1px; margin-bottom: 2px;">Confidentiality &amp; Human Authority</h3>
+      <ul style="margin-left: 12px; margin-bottom: 1px;">
+        <li><strong>Confidentiality Protocol:</strong> Original screenplay files are excluded from public git and kept private; shortlisted candidate transcript evidence (dialogue lines and timestamps) is sent to the configured Gemini API for scoring.</li>
+        <li><strong>Human Authority:</strong> AI proposes, ranks, and annotates; editors retain final review, boundary trimming, and NLE export approval.</li>
       </ul>
     </div>
   </div>
@@ -243,10 +247,10 @@
       <text x="18" y="67" font-size="6.7px" fill="#334155">&bull; Multi-episode series mode selection</text>
       <text x="18" y="78" font-size="6.7px" fill="#334155">&bull; Client state &amp; review inventory orchestration</text>
 
-      <!-- Arrow L1 -> L2 -->
+      <!-- Arrow 1: L1 -> L2 -->
       <line x1="232" y1="56" x2="252" y2="56" stroke="#2563eb" stroke-width="1.3" marker-end="url(#arrBlue)" />
       <rect x="233" y="47" width="18" height="9" rx="2" fill="#eff6ff" stroke="#bfdbfe" stroke-width="0.7" />
-      <text x="235" y="54" font-size="5.8px" font-weight="700" fill="#1d4ed8">Events</text>
+      <text x="234" y="54" font-size="5.7px" font-weight="700" fill="#1d4ed8">1: Events</text>
 
       <!-- Layer 2 Card -->
       <rect x="254" y="19" width="248" height="73" rx="4" fill="#ffffff" stroke="#86efac" stroke-width="1.2" />
@@ -255,14 +259,14 @@
       <text x="496" y="31" font-size="6.3px" font-weight="600" fill="#15803d" text-anchor="end">screenplayEngine.ts (TS)</text>
       <text x="260" y="45" font-size="6.7px" fill="#334155">&bull; Integer-ms time parsing (mm:ss.ff &rarr; ms; zero drift)</text>
       <text x="260" y="56" font-size="6.7px" fill="#334155">&bull; 20&ndash;60s duration window generation (10,883 formed)</text>
-      <text x="260" y="67" font-size="6.7px" fill="#334155">&bull; Timestamped dialogue-boundary validation (&lt;0.1s)</text>
+      <text x="260" y="67" font-size="6.7px" fill="#334155">&bull; Screenplay dialogue-boundary validation (&lt;0.1s)</text>
       <text x="260" y="78" font-size="6.7px" fill="#334155">&bull; Overlap &amp; continuation de-dup &rarr; 146 pool &rarr; 70 shortlist</text>
 
       <!-- Layer 5 Card -->
       <rect x="524" y="19" width="224" height="73" rx="4" fill="#ffffff" stroke="#fcd34d" stroke-width="1.2" />
       <rect x="524" y="19" width="224" height="17" rx="4" fill="#fffbeb" />
-      <text x="530" y="31" font-size="7.6px" font-weight="700" fill="#92400e">LAYER 5 &mdash; EDITORIAL WORKSPACE</text>
-      <text x="742" y="31" font-size="6.3px" font-weight="600" fill="#b45309" text-anchor="end">Review &amp; NLE Export</text>
+      <text x="530" y="31" font-size="7.4px" font-weight="700" fill="#92400e">LAYER 5 &mdash; EDITORIAL REVIEW &amp; EXPORT</text>
+      <text x="742" y="31" font-size="6.2px" font-weight="600" fill="#b45309" text-anchor="end">NLE Export</text>
       <text x="530" y="45" font-size="6.7px" fill="#334155">&bull; Matches JSON scores to candidate IDs</text>
       <text x="530" y="56" font-size="6.7px" fill="#334155">&bull; Deterministic series weighting (+5 early, -6 late)</text>
       <text x="530" y="67" font-size="6.7px" fill="#334155">&bull; Context Review flags &amp; boundary nudge controls</text>
@@ -282,35 +286,35 @@
       <text x="101" y="178" font-size="6.7px" fill="#334155">&bull; Pydantic schema validation &amp; strict error handling</text>
       <text x="101" y="189" font-size="6.7px" fill="#334155">&bull; Secure server-side credential isolation (zero browser keys)</text>
 
-      <!-- Arrow L2 -> L3 (POST /api/demo/scoring/run) -->
+      <!-- Arrow 2: L2 -> L3 (POST /api/demo/scoring/run) -->
       <path d="M 310 92 L 310 104 L 180 104 L 180 125" fill="none" stroke="#475569" stroke-width="1.3" marker-end="url(#arrSlate)" />
-      <rect x="185" y="98" width="175" height="12" rx="3" fill="#ffffff" stroke="#94a3b8" stroke-width="0.8" />
-      <text x="188" y="107" font-size="6.2px" font-weight="700" fill="#0f172a">HTTP POST /api/demo/scoring/run (Shortlist batches)</text>
+      <rect x="180" y="98" width="188" height="12" rx="3" fill="#ffffff" stroke="#94a3b8" stroke-width="0.8" />
+      <text x="183" y="107" font-size="6.2px" font-weight="700" fill="#0f172a">2: HTTP POST /api/demo/scoring/run (Shortlist)</text>
 
       <!-- Layer 4 Card -->
       <rect x="440" y="130" width="308" height="73" rx="4" fill="#ffffff" stroke="#d8b4fe" stroke-width="1.2" />
       <rect x="440" y="130" width="308" height="17" rx="4" fill="#faf5ff" />
       <text x="446" y="142" font-size="7.6px" font-weight="700" fill="#6b21a8">LAYER 4 &mdash; AI SCORING</text>
       <text x="742" y="142" font-size="6.3px" font-weight="600" fill="#7c3aed" text-anchor="end">Google Gemini (gemini-3.1-flash-lite)</text>
-      <text x="446" y="156" font-size="6.7px" fill="#334155">&bull; Evaluates 70 shortlisted candidates in 7 parallel batches</text>
+      <text x="446" y="156" font-size="6.7px" fill="#334155">&bull; Evaluates 70 shortlisted candidates in 7 batches of 10</text>
       <text x="446" y="167" font-size="6.7px" fill="#334155">&bull; Hook Potency (0&ndash;100) &bull; Cliffhanger Unresolvedness (0&ndash;100)</text>
       <text x="446" y="178" font-size="6.7px" fill="#334155">&bull; Standalone Clarity (0&ndash;100) &amp; Evidence-Grounded Rationales</text>
       <text x="446" y="189" font-size="6.7px" fill="#334155">&bull; Strict JSON Schema output; ZERO clock arithmetic duty</text>
 
-      <!-- Arrow L3 -> L4 (Scoring Dispatch) -->
+      <!-- Arrow 3: L3 -> L4 (Scoring Dispatch) -->
       <line x1="375" y1="156" x2="434" y2="156" stroke="#7c3aed" stroke-width="1.3" marker-end="url(#arrPurple)" />
-      <rect x="378" y="149" width="56" height="11" rx="2" fill="#faf5ff" stroke="#d8b4fe" stroke-width="0.8" />
-      <text x="380" y="157" font-size="6.0px" font-weight="700" fill="#6b21a8">Model Dispatch</text>
+      <rect x="376" y="149" width="62" height="11" rx="2" fill="#faf5ff" stroke="#d8b4fe" stroke-width="0.8" />
+      <text x="378" y="157" font-size="5.8px" font-weight="700" fill="#6b21a8">3: Dispatch</text>
 
-      <!-- Arrow L4 -> L3 (Schema Response) -->
+      <!-- Arrow 4: L4 -> L3 (Schema Response) -->
       <line x1="440" y1="174" x2="381" y2="174" stroke="#0d9488" stroke-width="1.3" marker-end="url(#arrTeal)" />
-      <rect x="382" y="167" width="52" height="11" rx="2" fill="#f0fdfa" stroke="#5eead4" stroke-width="0.8" />
-      <text x="384" y="175" font-size="6.0px" font-weight="700" fill="#0f766e">JSON Scores</text>
+      <rect x="378" y="167" width="60" height="11" rx="2" fill="#f0fdfa" stroke="#5eead4" stroke-width="0.8" />
+      <text x="380" y="175" font-size="5.8px" font-weight="700" fill="#0f766e">4: Scores</text>
 
-      <!-- Arrow L3 -> L5 (Return through FastAPI to Frontend Workspace) -->
+      <!-- Arrow 5: L3 -> L5 (Return through FastAPI to Frontend Workspace) -->
       <path d="M 365 130 L 365 112 L 637 112 L 637 97" fill="none" stroke="#059669" stroke-width="1.3" marker-end="url(#arrGreen)" />
-      <rect x="430" y="106" width="180" height="12" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="0.8" />
-      <text x="434" y="115" font-size="6.2px" font-weight="700" fill="#065f46">Structured JSON Response (Scores &amp; Rationale)</text>
+      <rect x="420" y="106" width="198" height="12" rx="3" fill="#ffffff" stroke="#86efac" stroke-width="0.8" />
+      <text x="423" y="115" font-size="6.1px" font-weight="700" fill="#065f46">5: HTTP 200 Response (Scores &amp; Rationale)</text>
     </svg>
   </div>
 
@@ -352,7 +356,7 @@
     <div class="card">
       <h3>Inference Throughput & Cost Accounting</h3>
       <div class="funnel-row"><span>Model Identifier:</span><strong>gemini-3.1-flash-lite</strong></div>
-      <div class="funnel-row"><span>Model Shortlist Evaluated:</span><strong>70 candidates</strong> (7 batches)</div>
+      <div class="funnel-row"><span>Model Shortlist Evaluated:</span><strong>70 candidates</strong> (7 batches of 10)</div>
       <div class="funnel-row"><span>Input Tokens Scored:</span><strong>45,558 tokens</strong></div>
       <div class="funnel-row"><span>Output Tokens Generated:</span><strong>10,278 tokens</strong></div>
       <div class="funnel-row"><span>Wall-Clock Run Time:</span><strong>67.87 seconds</strong></div>
@@ -374,7 +378,7 @@
     <h1>PromoForge: Quality Evaluation, Failures & Roadmap</h1>
     <div class="meta">
       <span><strong>Independent Benchmark, Failure Retrospective & Production Integration</strong></span>
-      <span><strong>Commit:</strong> 3a225ec</span>
+      <span><strong>Commit:</strong> 4699e19</span>
       <span><strong>Production URL:</strong> <a href="https://promoforge.vercel.app">https://promoforge.vercel.app</a></span>
     </div>
   </div>

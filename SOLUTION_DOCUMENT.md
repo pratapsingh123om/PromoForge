@@ -7,20 +7,20 @@
 
 ## 1. Problem Choice & Operational Framing
 
-### Why Problem 1 (Find the Promos)?
-I chose **Problem 1 (Find the Promos)** because discovering high-converting promotional cut points is the single most urgent operational bottleneck in vertical drama streaming. While other challenges drift toward speculative end-to-end video synthesis, promo selection is an immediate, business-critical editorial workflow with clear evaluation criteria:
+### Why Problem 1? (Operational Relevance, Testability & Separation of Concerns)
+Kuku's assignment describes a recurring editorial workflow: editors manually review episodes to identify promotional moments, while new shows are released weekly. This creates an opportunity to automate candidate discovery without removing editorial judgment. I selected this problem for three reasons:
 
-1. **Immediate Operational Bottleneck:** Editing teams manually comb through hours of episodic drama to find 30–60s acquisition hooks for TikTok, Reels, and YouTube Shorts under weekly release deadlines.
-2. **Directly Measurable Business Impact:** Top-of-funnel promo retention and click-through directly drive initial coin unlocks and subscriber acquisition curves.
-3. **Realistic Series-Scale Verifiability:** The 50 supplied episodes (~3,727 events) permit rigorous full-series stress testing against real-world production scale rather than isolated toy demos.
-4. **Clean Division of Labor:** High-precision deterministic code guarantees timing invariants and boundary physics, while AI evaluates narrative tension, dramatic pacing, and curiosity gaps.
-5. **Scoped for Editorial Utility:** Focuses on solving candidate discovery and NLE cut-sheet generation rather than ungrounded "virality" hype or synthetic video hallucinations.
+- **Operational relevance:** Promo discovery is a repeated task that can potentially be made more efficient through automation.
+- **Testability:** The supplied 50-episode timestamped screenplay pack makes each proposed cut traceable to its source and enables reproducible validation.
+- **Natural AI-code separation:** Deterministic code can enforce timing and structural constraints, while an LLM evaluates narrative qualities such as hooks, cliffhangers and standalone clarity.
 
-### Hard Editorial Invariants & Operating Boundaries
+I deliberately scoped PromoForge to finding and ranking promotional moments rather than generating finished advertisements. This allowed me to build and evaluate an end-to-end prototype within the assignment's time constraint, while keeping the final creative decision with human editors.
+
+### Hard Structural Invariants & Operating Boundaries
 - **Duration Bounds:** Strictly bounded to 20.0s – 60.0s total runtime.
-- **Dialogue Boundary Validation:** Zero cuts inside spoken lines (<0.1s tolerance against script event clocks; text-only boundary check).
-- **Curiosity Hook & Cliffhanger:** Opening hook in first 3.0s; ends on maximum unresolved curiosity/tension without answering its own premise.
-- **Confidentiality Guarantee:** Zero proprietary screenplay dialogue committed to public git or leaked to public models.
+- **Timestamped Screenplay-Boundary Validation:** Zero cuts inside spoken lines (<0.1s tolerance against script event clocks; text-only boundary check).
+- **Curiosity Hook & Cliffhanger:** Opening hook in first 3.0s; ends on unresolved tension without answering its own premise.
+- **Confidentiality Protocol:** Original screenplay files are excluded from public GitHub and kept private, while shortlisted candidate transcript evidence (dialogue lines and timestamps) is sent to the configured Gemini API for scoring.
 - **Human-in-the-Loop Workflow:** AI proposes, ranks, and annotates; editors retain final review, boundary trimming, and NLE export control.
 
 ---
@@ -33,7 +33,7 @@ PromoForge enforces a strict five-layer runtime architecture that separates dete
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │ BROWSER RUNTIME • TypeScript / React 19 / Vite (Deployed on Vercel)                    │
 │                                                                                        │
-│  ┌─────────────────────────┐  Events   ┌───────────────────────────┐                   │
+│  ┌─────────────────────────┐ 1: Events ┌───────────────────────────┐                   │
 │  │ LAYER 1: FRONTEND UI    │──────────▶│ LAYER 2: DETERMINISTIC    │                   │
 │  │ • React 19, TS, Vite    │           │ • screenplayEngine.ts     │                   │
 │  │ • 50-Ep Intake & Upload │           │ • Integer-ms clock math   │                   │
@@ -44,7 +44,7 @@ PromoForge enforces a strict five-layer runtime architecture that separates dete
 │                                        └─────────────┬─────────────┘                   │
 │                                                      │                                 │
 │  ┌───────────────────────────────────────────────────┼──────────────────────────────┐  │
-│  │ LAYER 5: EDITORIAL REVIEW WORKSPACE               │                              │  │
+│  │ LAYER 5: EDITORIAL REVIEW & EXPORT                │                              │  │
 │  │ • Matches JSON scores by candidate ID             │                              │  │
 │  │ • Deterministic series adjustments (+5 early, -6 late)                           │  │
 │  │ • "Context Review Needed" AI-heuristic disagreement flags                        │  │
@@ -53,29 +53,29 @@ PromoForge enforces a strict five-layer runtime architecture that separates dete
 │  └───────────────────────────────────────────────────┼──────────────────────────────┘  │
 └──────────────────────────────────────────────────────┼─────────────────────────────────┘
                                                        │
-                           HTTP POST /api/demo/scoring/run (Shortlist batches)
+                     2: HTTP POST /api/demo/scoring/run (Shortlist)
                                                        │
                                                        ▼
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │ SERVERLESS BACKEND & CLOUD AI • Python FastAPI / Google Gemini API                     │
 │                                                                                        │
-│  ┌──────────────────────────────┐  Batch Dispatch   ┌───────────────────────────────┐  │
-│  │ LAYER 3: BACKEND API SERVICE │──────────────────▶│ LAYER 4: AI SCORING           │  │
-│  │ • FastAPI • Python 3.12      │                   │ • gemini-3.1-flash-lite       │  │
-│  │ • Vercel rewrite: /api/*     │◀──────────────────│ • 70 cands in 7 batches       │  │
-│  │ • POST /api/demo/scoring/run │   JSON Scores     │ • Hook Potency (0-100)        │  │
-│  │ • Pydantic schema validation │                   │ • Cliffhanger Urgency (0-100) │  │
-│  │ • Secure credential injection│                   │ • Standalone Clarity (0-100)  │  │
-│  │ • Error handling & dispatch  │                   │ • ZERO clock arithmetic       │  │
-│  └──────────────┬───────────────┘                   └───────────────────────────────┘  │
+│  ┌──────────────────────────────┐ 3: Dispatch   ┌───────────────────────────────────┐  │
+│  │ LAYER 3: BACKEND API SERVICE │──────────────▶│ LAYER 4: AI SCORING               │  │
+│  │ • FastAPI • Python 3.12      │               │ • gemini-3.1-flash-lite           │  │
+│  │ • Vercel rewrite: /api/*     │◀──────────────│ • 70 cands in 7 batches of 10     │  │
+│  │ • POST /api/demo/scoring/run │   4: Scores   │ • Hook Potency (0-100)            │  │
+│  │ • Pydantic schema validation │               │ • Cliffhanger Urgency (0-100)     │  │
+│  │ • Secure credential injection│               │ • Standalone Clarity (0-100)      │  │
+│  │ • Error handling & dispatch  │               │ • ZERO clock arithmetic           │  │
+│  └──────────────┬───────────────┘               └───────────────────────────────────┘  │
 │                 │                                                                      │
 │                 └───────────────────────────────────┐                                  │
 └─────────────────────────────────────────────────────┼──────────────────────────────────┘
                                                       │
-                       Structured JSON Response (Returned through FastAPI)
+               5: HTTP 200 Response (Scores & Rationale returned to Layer 5)
                                                       │
                                                       ▼
-                                       (To Layer 5 Editorial Workspace)
+                                       (To Layer 5 Editorial Review & Export)
 ```
 
 > **Design principle:** deterministic code owns correctness, AI evaluates narrative meaning, and editors retain creative control.
@@ -86,8 +86,8 @@ PromoForge enforces a strict five-layer runtime architecture that separates dete
 | :--- | :--- | :--- | :--- |
 | **Browser / Client Engine** | TypeScript 5.7 / `screenplayEngine.ts` | Integer-ms timing calculations, boundary validation (<0.1s tolerance), candidate window generation [20s, 60s], overlap suppression (≥4.0s or >15%), continuation de-duplication, shortlist stratification (146 pool → 70 model), NLE export formatting (EDL, OTIO). | Never evaluate narrative subtext, emotional tension, or pronoun ambiguity. |
 | **Backend API** | FastAPI / Python 3.12 (Vercel `/api/*`) | HTTP routing via `vercel.json`, Pydantic request/response schema validation, server-side API credential isolation, provider dispatch, batch orchestration, rate limit handling. | Never expose raw Gemini API keys to the browser; never perform client UI rendering. |
-| **AI Semantic Evaluator** | Google Gemini (`gemini-3.1-flash-lite`) | Narrative Hook Potency (0–100), Cliffhanger Unresolvedness & Urgency (0–100), Standalone Clarity & Context Audit (0–100), evidence-grounded rationale generation. | **Zero arithmetic responsibility:** Never calculate durations, subtract timestamps, or filter overlaps. |
-| **Human Editor** | Editorial Review Workspace (React 19) | Final creative judgment, reviewing "Context Review Needed" AI-heuristic disagreement flags, line-boundary trim nudging on real dialogue events, Approve/Reject review, NLE export trigger. | Never bypassed by full-autonomous publishing; retains 100% final editorial authority. |
+| **AI Semantic Evaluator** | Google Gemini (`gemini-3.1-flash-lite`) | Narrative Hook Potency (0–100), Cliffhanger Unresolvedness & Urgency (0–100), Standalone Clarity & Context Audit (0–100), evidence-grounded rationale generation (7 batches of 10 candidates). | **Zero arithmetic responsibility:** Never calculate durations, subtract timestamps, or filter overlaps. |
+| **Human Editor** | Editorial Review & Export (React 19) | Final creative judgment, reviewing "Context Review Needed" AI-heuristic disagreement flags, line-boundary trim nudging on real dialogue events, Approve/Reject review, NLE export trigger. | Never bypassed by full-autonomous publishing; retains 100% final editorial authority. |
 
 ---
 
@@ -108,9 +108,9 @@ The engine audited all 50 screenplay files (3,727 total timestamped events) and 
 *(Note on funnel evolution: In the initial baseline run prior to the 4.0s duplicate fix, overlap suppression was 9,985, continuation was 744, and cap drop was 1, accepting 153 candidates: $10{,}883 - 9{,}985 - 744 - 1 = 153$. The tightened $\ge 4.0$s duplicate suppression and soft damping refined the accepted pool to 146 candidates with 0 cap drop).*
 
 ### Shortlist Allocation, Inference Cost & Throughput
-From the 146 clean candidates in the accepted pool, PromoForge selected a bounded, stratified shortlist of **70 candidates** across all 50 episodes (`SERIES_MODEL_CANDIDATES = 70` in `src/services/demoRun.ts`) to be evaluated by the LLM. These 70 candidates were scored using **Google Gemini (`gemini-3.1-flash-lite`)** in 7 parallel batches (10 candidates per batch):
+From the 146 clean candidates in the accepted pool, PromoForge selected a bounded, stratified shortlist of **70 candidates** across all 50 episodes (`SERIES_MODEL_CANDIDATES = 70` in `src/services/demoRun.ts`) to be evaluated by the LLM. These 70 candidates were scored using **Google Gemini (`gemini-3.1-flash-lite`)** in 7 batches of 10 candidates:
 - **Model Identifier:** `gemini-3.1-flash-lite` (verified from `run_log.json` and `backend/.env.example`)
-- **Candidates Scored by Model:** 70 candidates across all 50 episodes (in 7 parallel batch calls)
+- **Candidates Scored by Model:** 70 candidates across all 50 episodes (in 7 batches of 10 candidates)
 - **Total Input Tokens:** 45,558 tokens
 - **Total Output Tokens:** 10,278 tokens
 - **Total Wall Time:** 67.87 seconds
