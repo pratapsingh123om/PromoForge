@@ -132,10 +132,13 @@ Independent verification script (`scripts/verify_independent_run.mjs`) evaluated
 9. **Rank 9 (EP_012 00:00.00–00:39.40):** Opens on expulsion demand at 00:00.00 (<3s: Yes). Ends on direct threat question (Unresolved: Yes). Standalone: Yes.
 10. **Rank 10 (EP_018 00:12.00–00:51.00):** Opens on arrest warrant (<3s: Yes). Ends on unanswered carriage location question (Unresolved: Yes). Standalone: Yes.
 
-### 6c. Independent Reference Window Benchmark (Claude LLM-Generated References; Not Human Ground Truth)
-> Claude generated reference windows for six episodes (24, 41, 47 with two windows each; 6, 14, 17 with none). **These are LLM-generated reference cuts, not human editorial ground truth or a manually labelled gold set.** A window counts as matched if one of the tool's per-episode top 3 overlaps it by at least 50% (intersection over the shorter clip). **5 of 6 windows matched; all three strong episodes had at least one match; the one miss was EP_041 window 1 (9.6% overlap).** Whether quiet episodes 6, 14 and 17 produced no promo: Not measured (the offline rule tool returned 1–2 candidates above 70.0 for each because heuristic scoring lacks semantic romance discernment).
+### 6c. Independent Reference Window Benchmark (Claude LLM References; Not Human Ground Truth)
+> Claude generated reference windows for six episodes (24, 41, 47 with two windows each; 6, 14, 17 with none). **These are LLM-generated reference cuts, not human editorial ground truth or a manually labelled gold set.** 
 
-**Detailed Metric Comparison:**
+We report two separate evaluation benchmark results to reflect both pipeline modes:
+
+#### 1. Per-Episode Rule Cut-Sheet Benchmark (`gold_results.json`)
+Evaluates the unconstrained per-episode candidate generation (top 3 per episode available for matching):
 - **Lenient Metric (Intersection over Shorter Clip $\ge 50\%$):** **5 of 6 (83.3%)**
   - EP_024 w1: 66.7% (HIT)
   - EP_024 w2: 87.6% (HIT)
@@ -150,11 +153,23 @@ Independent verification script (`scripts/verify_independent_run.mjs`) evaluated
   - EP_041 w2: 83.1% (HIT)
   - EP_047 w1: 51.2% (HIT)
   - EP_047 w2: 100.0% (HIT)
-- **Negative Controls (Quiet Episodes 6, 14, 17):**
-  - Tool output for EP_006: 2 candidates (scores 81.5, 75.5)
-  - Tool output for EP_014: 1 candidate (score 73.2) above 70.0
-  - Tool output for EP_017: 1 candidate (score 76.3) above 70.0
-  - *Finding:* Heuristic rule-based scoring failed to suppress quiet romance episodes without semantic LLM evaluation.
+- **Negative Controls (Quiet Episodes 6, 14, 17):** Returned 1–2 candidates above 70.0 (rule heuristics lack semantic romance discernment).
+
+#### 2. Actual Full-Series Gemini-Scored Run (`gold_results_gemini.json`)
+Evaluates the actual series-wide execution (`outputs/run-2026-11-21T06-35-55-637Z/promos.json`):
+- **Lenient Metric (Intersection over Shorter Clip $\ge 50\%$):** **2 of 6 (33.3%)**
+  - EP_024 w1: 66.7% (HIT)
+  - EP_024 w2: 5.8% (MISS)
+  - EP_041 w1: 9.6% (MISS)
+  - EP_041 w2: Not in 70-model shortlist (MISS)
+  - EP_047 w1: Not in 70-model shortlist (MISS)
+  - EP_047 w2: Not in 70-model shortlist (MISS)
+- **Strict Metric (Intersection over Union / IoU $\ge 50\%$):** **1 of 6 (16.7%)**
+  - EP_024 w1: 35.4% (MISS)
+  - EP_024 w2: 2.4% (MISS)
+  - EP_041 w1: 4.8% (MISS)
+- **Negative Controls (Quiet Episodes 6, 14, 17):** **Passed** (100% excluded from top 25 series promos).
+- **Gap Analysis:** In the full-series execution, Gemini scored a bounded shortlist of 70 candidates across all 50 episodes (~1.4 per episode), so target episodes 24 and 41 had only 1 candidate shortlisted for model scoring compared to 2–3 in per-episode mode. While shortlist allocation affected which candidates reached the model, it does not conclusively explain the entire performance gap; semantic divergence in hook tension and cliffhanger valuation between LLM architectures also accounts for differing cut selections.
 
 ---
 

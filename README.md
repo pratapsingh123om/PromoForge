@@ -90,14 +90,18 @@ Stratified Accepted Candidate Pool:       146 clean candidates
 
 ---
 
-## Quality Evaluation: Dual Overlap Metrics Against Independent Reference
+## Quality Evaluation: Two Independent LLM Benchmark Results
 
-To ensure transparent reporting, PromoForge benchmarks against an independently generated reference set (Claude 3.7 Sonnet). **Note:** These are **LLM-generated reference cuts, not human editorial ground truth or a manually labeled gold set**. Both lenient and strict evaluation criteria are reported side-by-side:
+PromoForge benchmarks against an independently generated reference set from an external LLM (Claude 3.7 Sonnet). **Crucial editorial distinction:** These are **LLM-generated reference cuts, not human editorial ground truth or a manually labeled gold set**.
 
-| Benchmark Metric | Threshold Criterion | Independent Reference Result |
-| :--- | :--- | :---: |
-| **Lenient Overlap** | Overlap $\ge 50\%$ of shorter clip | **5 of 6 (83.3%)** |
-| **Strict Overlap (IoU)** | Temporal Intersection-over-Union $\ge 50\%$ | **4 of 6 (66.7%)** |
+We report the two separate benchmark evaluations side-by-side:
+
+| Benchmark Evaluation Run | Source Output Evaluated | Lenient Overlap (≥50% shorter) | Strict Overlap (IoU ≥50%) | Quiet Negative Controls (6, 14, 17) |
+| :--- | :--- | :---: | :---: | :---: |
+| **1. Per-Episode Rule Cut Sheets** (`gold_results.json`) | Unconstrained top 3 per episode | **5 of 6 (83.3%)** | **4 of 6 (66.7%)** | Failed (returned 1–2 candidates > 70) |
+| **2. Actual Full-Series Gemini Run** (`gold_results_gemini.json`) | Bounded 70-shortlist across 50 eps | **2 of 6 (33.3%)** | **1 of 6 (16.7%)** | **Passed** (100% excluded from top 25) |
+
+*Shortlist & Evaluation Analysis:* In the full-series execution, Gemini scored a bounded shortlist of 70 candidates across all 50 episodes (~1.4 per episode), so target episodes 24 and 41 had only 1 candidate shortlisted for model scoring compared to 3 in per-episode mode. While shortlist allocation affected which candidates reached the model, it does not conclusively explain the entire performance gap; semantic divergence in hook tension and cliffhanger valuation between LLM architectures also accounts for differing cut selections.
 
 ---
 

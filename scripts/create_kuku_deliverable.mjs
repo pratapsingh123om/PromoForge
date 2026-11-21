@@ -27,9 +27,13 @@ fs.copyFileSync(path.join(runDir, "promos.otio"), path.join(stagingDir, "ranked_
 fs.copyFileSync(path.join(runDir, "cut_list.csv"), path.join(stagingDir, "cut_list.csv"));
 
 // 2. Evaluation results
-const evalSrc = path.join(repoRoot, "gold_results_gemini.json");
-if (fs.existsSync(evalSrc)) {
-  fs.copyFileSync(evalSrc, path.join(stagingDir, "evaluation_results.json"));
+const evalGeminiSrc = path.join(repoRoot, "gold_results_gemini.json");
+if (fs.existsSync(evalGeminiSrc)) {
+  fs.copyFileSync(evalGeminiSrc, path.join(stagingDir, "evaluation_results_gemini.json"));
+}
+const evalRuleSrc = path.join(repoRoot, "gold_results.json");
+if (fs.existsSync(evalRuleSrc)) {
+  fs.copyFileSync(evalRuleSrc, path.join(stagingDir, "evaluation_results_rule_cutsheets.json"));
 }
 
 // 3. Raw model responses
@@ -97,7 +101,8 @@ Both \`ranked_promos.json\` (25 promo objects) and \`ranked_promos.csv\` (25 dat
 | **\`ranked_promos.json\`** | JSON | Complete structured metadata for all 25 top-ranked promos, including scores, rationale, transcripts, hook/cliffhanger lines, and quality flags. |
 | **\`ranked_promos.csv\`** | CSV | Tabular summary of all 25 promos with ranks, episodes, timecodes, raw scores, series adjustments, acquisition scores, hook lines, and cliffhangers. |
 | **\`run_log.json\`** | JSON | Comprehensive machine audit log capturing run ID, timing breakdowns, token counts, model identifier, parameter configuration, and top-10 rationale. |
-| **\`evaluation_results.json\`** | JSON | Dual overlap benchmark results evaluated against independent reference windows (Claude 3.7 Sonnet): Lenient Overlap: 5/6 (83.3%), Strict IoU: 4/6 (66.7%). |
+| **\`evaluation_results_gemini.json\`** | JSON | Benchmark evaluation of the actual full-series Gemini run against Claude LLM reference windows: 2/6 lenient (33.3%), 1/6 strict (16.7%); quiet episodes 100% excluded. |
+| **\`evaluation_results_rule_cutsheets.json\`** | JSON | Benchmark evaluation of unconstrained per-episode rule cut sheets against Claude LLM reference windows: 5/6 lenient (83.3%), 4/6 strict (66.7%). |
 | **\`ranked_promos.edl\`** | CMX 3600 EDL | Industry-standard Edit Decision List (non-drop frame timecode) for direct import into Premiere Pro, DaVinci Resolve, or Final Cut Pro. |
 | **\`ranked_promos.otio\`** | OpenTimelineIO | Native OpenTimelineIO track schema containing sequential clip tracks and editorial metadata for modern NLE pipelines. |
 | **\`cut_list.csv\`** | CSV | Streamlined cut sheet for video editors listing promo ID, episode, in/out timestamps, duration, and hook speaker. |
