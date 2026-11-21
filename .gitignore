@@ -26,3 +26,6 @@ expo/
 test_drama/
 *.zip
 
+
+dist_deliverable/
+

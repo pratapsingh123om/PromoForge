@@ -15,8 +15,8 @@
   }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-size: 8.5pt;
-    line-height: 1.28;
+    font-size: 8.4pt;
+    line-height: 1.27;
     color: #1a1a1a;
     background: #fff;
   }
@@ -33,18 +33,18 @@
   }
   .header {
     border-bottom: 2px solid #2563eb;
-    padding-bottom: 4px;
-    margin-bottom: 6px;
+    padding-bottom: 3px;
+    margin-bottom: 5px;
   }
   h1 {
-    font-size: 14pt;
+    font-size: 13.5pt;
     font-weight: 800;
     color: #0f172a;
     letter-spacing: -0.02em;
     margin-bottom: 2px;
   }
   .meta {
-    font-size: 7.5pt;
+    font-size: 7.3pt;
     color: #475569;
     display: flex;
     justify-content: space-between;
@@ -55,7 +55,7 @@
     text-decoration: none;
   }
   h2 {
-    font-size: 9.5pt;
+    font-size: 9.3pt;
     font-weight: 700;
     color: #1e293b;
     border-bottom: 1px solid #e2e8f0;
@@ -66,7 +66,7 @@
     letter-spacing: 0.03em;
   }
   h3 {
-    font-size: 8.5pt;
+    font-size: 8.3pt;
     font-weight: 700;
     color: #334155;
     margin-top: 3px;
@@ -78,7 +78,7 @@
   }
   ul, ol {
     margin-left: 14px;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
   }
   li {
     margin-bottom: 1.5px;
@@ -102,10 +102,10 @@
     background: #0f172a;
     color: #f8fafc;
     border-radius: 4px;
-    padding: 6px 8px;
+    padding: 5px 8px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 6.8pt;
-    line-height: 1.22;
+    font-size: 6.7pt;
+    line-height: 1.21;
     margin: 4px 0;
   }
   .diagram-box pre {
@@ -115,11 +115,11 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 7.2pt;
-    margin: 3px 0 5px 0;
+    font-size: 7.1pt;
+    margin: 3px 0 4px 0;
   }
   th, td {
-    padding: 2.5px 4px;
+    padding: 2.2px 4px;
     border: 1px solid #cbd5e1;
     text-align: left;
   }
@@ -137,7 +137,7 @@
     padding: 1px 4px;
     border-radius: 2px;
     font-weight: 700;
-    font-size: 6.8pt;
+    font-size: 6.7pt;
   }
   .tag-miss {
     background: #fee2e2;
@@ -145,13 +145,13 @@
     padding: 1px 4px;
     border-radius: 2px;
     font-weight: 700;
-    font-size: 6.8pt;
+    font-size: 6.7pt;
   }
   .funnel-row {
     display: flex;
     justify-content: space-between;
     font-family: monospace;
-    font-size: 7.5pt;
+    font-size: 7.3pt;
     padding: 1px 0;
     border-bottom: 1px dashed #e2e8f0;
   }
@@ -162,7 +162,7 @@
     right: 0;
     display: flex;
     justify-content: space-between;
-    font-size: 6.8pt;
+    font-size: 6.7pt;
     color: #94a3b8;
     border-top: 1px solid #e2e8f0;
     padding-top: 2px;
@@ -177,20 +177,20 @@
     <h1>PromoForge: Automated Editorial Intelligence for Drama Promos</h1>
     <div class="meta">
       <span><strong>Kuku AI Generalist Assignment</strong> &bull; Problem 1 (Find the Promos)</span>
-      <span><strong>Stack:</strong> React 19, TypeScript, Tailwind v4, Vite 8, Python/FastAPI</span>
+      <span><strong>Production App:</strong> <a href="https://promoforge.vercel.app">https://promoforge.vercel.app</a></span>
       <span><strong>Repo:</strong> <a href="https://github.com/pratapsingh123om/PromoForge">github.com/pratapsingh123om/PromoForge</a></span>
     </div>
   </div>
 
   <h2>1. Problem Framing & Assumptions</h2>
-  <p>Vertical short-form drama platforms (TikTok, Reels, Shorts) rely entirely on hook retention to drive episode purchases. Discovering viral promotional cut points across 50 full-length episodes (~3,700 script events) is manually grueling. Naive LLM windowing fails in production due to <strong>audio slicing</strong> (cutting mid-word), <strong>context collapse</strong> (unresolved pronouns like "He betrayed her"), <strong>continuation spoilers</strong> (a promo that answers its own cliffhanger), and <strong>late-series narrative spoilage</strong>.</p>
+  <p>Vertical short-form drama platforms (TikTok, Reels, Shorts) rely entirely on hook retention to drive episode purchases. Discovering viral promotional cut points across 50 full-length episodes (~3,700 script events) is manually grueling. Naive LLM windowing fails in production due to <strong>dialogue slicing</strong> (cutting mid-speech), <strong>context collapse</strong> (unresolved pronouns like "He betrayed her"), <strong>continuation spoilers</strong> (a promo that answers its own cliffhanger), and <strong>late-series narrative spoilage</strong>.</p>
   
   <div class="grid-2">
     <div class="card">
       <h3>Hard Editorial Invariants</h3>
       <ul>
         <li><strong>Duration:</strong> Strictly bounded to 20.0s &ndash; 60.0s total runtime.</li>
-        <li><strong>Sub-Syllable Safety:</strong> Zero cuts inside spoken dialogue (&lt;0.1s tolerance).</li>
+        <li><strong>Dialogue Boundary Validation:</strong> Zero cuts inside spoken dialogue lines (&lt;0.1s tolerance; text-only boundary check).</li>
         <li><strong>Curiosity Hook & Gap:</strong> Opening hook in first 3.0s; ends on unresolved tension.</li>
         <li><strong>Confidentiality:</strong> Zero proprietary screenplay text committed to public git.</li>
       </ul>
@@ -207,14 +207,14 @@
 +---------------------------------------------------------------------------------------------------------+
 |                                    DETERMINISTIC CODE ENGINE (TypeScript)                               |
 | * Millisecond Arithmetic (mm:ss.ff -> ms)                * Duration Bounds Filter [20.0s, 60.0s]        |
-| * Zero Dialogue Slicing (<0.1s sub-syllable check)       * Overlap De-duplication (>= 4.0s or > 15%)     |
+| * Timestamped Dialogue-Boundary Validation (<0.1s check) * Overlap De-duplication (>= 4.0s or > 15%)     |
 | * Question-Answer Continuation Suppression               * Proportional Series Weight (+5 early, -6 late)|
 +----------------------------------------------------+----------------------------------------------------+
                                                      | 146 Clean Accepted Candidates (153 in baseline)
                                                      v
 +---------------------------------------------------------------------------------------------------------+
-|                                  AI SEMANTIC EVALUATION (Gemini Flash Lite)                             |
-| * Structured JSON Output with Strict Schema Validation   * Hook Potency & Emotional Shock (0-100)       |
+|                                 AI SEMANTIC EVALUATION (gemini-3.1-flash-lite)                          |
+| * Structured JSON Output with Strict Schema Validation   * Shortlist Bounded: 70 scored (7 batches of 10|
 | * Cliffhanger Unresolvedness & Urgency (0-100)           * Standalone Clarity & Ambiguity Audit (0-100) |
 +----------------------------------------------------+----------------------------------------------------+
                                                      | Reconciled Editorial Scores & Quality Badges
@@ -241,19 +241,19 @@
       <div class="funnel-row"><span>- Overlap Suppressed (&ge;4.0s or &gt;15%):</span><strong>-9,754</strong></div>
       <div class="funnel-row"><span>- Continuation Spoiler Suppressed:</span><strong>-983</strong></div>
       <div class="funnel-row"><span>- Episode Variety Limit Drop:</span><strong>-0</strong></div>
-      <div class="funnel-row" style="border-top:1px solid #cbd5e1; font-weight:700;"><span>= Stratified Accepted Shortlist Pool:</span><strong>146</strong></div>
-      <p style="font-size:6.8pt; color:#64748b; margin-top:2px;">10,883 - 9,754 - 983 - 0 = 146 clean candidates (100% exact math). Initial baseline run prior to 4.0s duplicate fix accepted 153 candidates (10,883 - 9,985 - 744 - 1 = 153).</p>
+      <div class="funnel-row" style="border-top:1px solid #cbd5e1; font-weight:700;"><span>= Stratified Accepted Candidate Pool:</span><strong>146</strong></div>
+      <p style="font-size:6.6pt; color:#64748b; margin-top:2px;">10,883 - 9,754 - 983 - 0 = 146 clean candidates (100% exact math). Baseline run prior to 4.0s duplicate fix accepted 153 candidates (10,883 - 9,985 - 744 - 1 = 153).</p>
     </div>
     <div class="card">
-      <h3>Inference Throughput & API Cost</h3>
+      <h3>Inference Throughput & Cost Accounting</h3>
       <div class="funnel-row"><span>Model Identifier:</span><strong>gemini-3.1-flash-lite</strong></div>
-      <div class="funnel-row"><span>Model Batch Calls:</span><strong>7 batches</strong> (10 cands/batch)</div>
+      <div class="funnel-row"><span>Model Shortlist Evaluated:</span><strong>70 candidates</strong> (7 batches)</div>
       <div class="funnel-row"><span>Input Tokens Scored:</span><strong>45,558 tokens</strong></div>
       <div class="funnel-row"><span>Output Tokens Generated:</span><strong>10,278 tokens</strong></div>
       <div class="funnel-row"><span>Wall-Clock Run Time:</span><strong>67.87 seconds</strong></div>
       <div class="funnel-row"><span>Actual Billed Console Cost:</span><strong>$0.00</strong> (developer free tier)</div>
       <div class="funnel-row" style="border-top:1px solid #cbd5e1; font-weight:700;"><span>Estimated Marginal Cost:</span><strong>$0.0065 / show</strong></div>
-      <p style="font-size:6.8pt; color:#64748b; margin-top:2px;">Calculated from Google Flash Lite pricing ($0.075/1M in, $0.30/1M out). A 1,000-episode series library costs ~$0.13 and processes in under 25 minutes.</p>
+      <p style="font-size:6.6pt; color:#64748b; margin-top:2px;">Estimated from official pricing ($0.075/1M in, $0.30/1M out). Never conflated with actual billed cost ($0.00). 1,000 episodes cost ~$0.13 in under 25 min.</p>
     </div>
   </div>
 
@@ -269,8 +269,8 @@
     <h1>PromoForge: Quality Evaluation, Failures & Roadmap</h1>
     <div class="meta">
       <span><strong>Independent Benchmark, Failure Retrospective & Production Integration</strong></span>
-      <span><strong>Commit:</strong> f2b9d90</span>
-      <span><strong>Vercel Preview:</strong> promoforge.vercel.app</span>
+      <span><strong>Commit:</strong> a236aa1</span>
+      <span><strong>Production URL:</strong> <a href="https://promoforge.vercel.app">https://promoforge.vercel.app</a></span>
     </div>
   </div>
 
@@ -365,12 +365,12 @@
     </div>
   </div>
 
-  <h2>6. Next Steps & Production Roadmap</h2>
+  <h2>6. Next Steps & Production Limitations</h2>
   <ol>
-    <li><strong>Multimodal Video/Audio Grounding:</strong> Ingest proxy video alongside text screenplays to correlate dialogue with facial close-ups, vocal loudness spikes, and scene cuts via Whisper timestamps.</li>
+    <li><strong>Text-Only Screenplay Modality Limitation:</strong> PromoForge operates strictly on parsed timestamped screenplay text. Dialogue boundary safety is validated against script event start and end clocks, not direct audio waveform or acoustic phoneme analysis. Non-verbal visual acting beats and unscripted audio cues require human editor review.</li>
+    <li><strong>Audio-Visual Multimodal Grounding:</strong> Ingest proxy video alongside text screenplays to correlate dialogue with facial close-ups, vocal loudness spikes, and scene cuts via Whisper timestamps.</li>
     <li><strong>Cross-Episode Multi-Segment Stitching:</strong> Expand the built-in <code>createMultiSegmentPromo</code> engine to automatically pair Episode 1 curiosity hooks with Episode 15 cliffhangers into seamless 45-second composite narrative teasers.</li>
-    <li><strong>Real-Time TikTok/Reels Performance Feedback:</strong> Connect social retention curve APIs via webhook to automatically adjust hook scoring weights based on second-by-second drop-off data.</li>
-    <li><strong>Direct NLE Cloud Plugins:</strong> Publish native Premiere Pro and DaVinci Resolve panels for 1-click timeline importing.</li>
+    <li><strong>Real-Time Retention Feedback Loop:</strong> Connect TikTok/Reels retention curve APIs via webhook to continuously tune hook scoring weights against real audience drop-off data.</li>
   </ol>
 
   <div class="footer-note">
