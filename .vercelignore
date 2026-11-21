@@ -1,5 +1,4 @@
 .git
-.figma
 .pytest_cache
 .pytest_temp
 .venv
