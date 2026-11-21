@@ -172,9 +172,13 @@ async def call_llm(
     provider_type = cfg.provider.lower()
 
     if provider_type in {"gemini", "google"}:
+        import os
+        gemini_model = cfg.model if cfg.model and cfg.model != "rule-based" else os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+        gemini_base_url = cfg.base_url if cfg.base_url and "openai" not in cfg.base_url else os.getenv("GEMINI_BASE_URL", "")
         provider = GeminiProvider(
             api_key=cfg.api_key,
-            model=cfg.model,
+            model=gemini_model,
+            base_url=gemini_base_url,
             temperature=cfg.temperature,
             max_tokens=cfg.max_tokens,
         )

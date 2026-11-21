@@ -1,0 +1,100 @@
+{
+  "status": "Evaluated",
+  "labeller": "Claude (single LLM reference, screenplay text only; not human editor ground truth)",
+  "sample_size": "6 episodes, 6 labelled windows",
+  "lenient_rule": "Intersection over shorter clip (overlap / min(cand_len, ref_len)) >= 50%",
+  "strict_rule": "Intersection over union (IoU = overlap / (cand_len + ref_len - overlap)) >= 50%",
+  "hits_lenient": 5,
+  "hit_rate_lenient_percent": 83.3,
+  "hits_strict_iou": 4,
+  "hit_rate_strict_iou_percent": 66.7,
+  "negative_controls": {
+    "episodes": [
+      "EP_006",
+      "EP_014",
+      "EP_017"
+    ],
+    "claude_label": "0 promos (quiet romance episodes)",
+    "tool_result": "Returned 1-2 promos above 70.0 quality threshold (EP_006: 81.5, 75.5; EP_014: 73.2; EP_017: 76.3). Rule-based engine failed to suppress quiet romance episodes without semantic/LLM judgment."
+  },
+  "details": [
+    {
+      "episode": "EP_024",
+      "window_index": 1,
+      "claude_window": [
+        22.5,
+        48
+      ],
+      "overlap_over_shorter": 0.667,
+      "intersection_over_union": 0.354,
+      "matched_candidate_key": "EP_024_P_0FA934C93DE2",
+      "hit_lenient_shorter": true,
+      "hit_strict_iou": false
+    },
+    {
+      "episode": "EP_024",
+      "window_index": 2,
+      "claude_window": [
+        6.8,
+        32.5
+      ],
+      "overlap_over_shorter": 0.876,
+      "intersection_over_union": 0.691,
+      "matched_candidate_key": "EP_024_P_AE7B8A8B9D1A",
+      "hit_lenient_shorter": true,
+      "hit_strict_iou": true
+    },
+    {
+      "episode": "EP_041",
+      "window_index": 1,
+      "claude_window": [
+        58,
+        84
+      ],
+      "overlap_over_shorter": 0.096,
+      "intersection_over_union": 0.048,
+      "matched_candidate_key": "EP_041_P_3773740C76D7",
+      "hit_lenient_shorter": false,
+      "hit_strict_iou": false
+    },
+    {
+      "episode": "EP_041",
+      "window_index": 2,
+      "claude_window": [
+        1.8,
+        28.4
+      ],
+      "overlap_over_shorter": 1,
+      "intersection_over_union": 0.831,
+      "matched_candidate_key": "EP_041_P_D79A791C61A5",
+      "hit_lenient_shorter": true,
+      "hit_strict_iou": true
+    },
+    {
+      "episode": "EP_047",
+      "window_index": 1,
+      "claude_window": [
+        56.8,
+        101
+      ],
+      "overlap_over_shorter": 0.683,
+      "intersection_over_union": 0.512,
+      "matched_candidate_key": "EP_047_P_CC2B0F55811F",
+      "hit_lenient_shorter": true,
+      "hit_strict_iou": true
+    },
+    {
+      "episode": "EP_047",
+      "window_index": 2,
+      "claude_window": [
+        1.8,
+        30.3
+      ],
+      "overlap_over_shorter": 1,
+      "intersection_over_union": 1,
+      "matched_candidate_key": "EP_047_P_BCDE8DCCA74F",
+      "hit_lenient_shorter": true,
+      "hit_strict_iou": true
+    }
+  ]
+}

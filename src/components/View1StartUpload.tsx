@@ -478,12 +478,22 @@ export function View1StartUpload({
           {modelSettings.provider === "gemini" && (
             <div className="space-y-3 pt-2">
               <div>
-                <label className="block text-xs font-medium text-neutral-400 mb-1">Gemini model</label>
+                <label className="block text-xs font-medium text-neutral-400 mb-1">Gemini model (or env: VITE_GEMINI_MODEL)</label>
                 <input
                   type="text"
                   value={modelSettings.modelName}
                   onChange={(e) => setModelSettings({ ...modelSettings, modelName: e.target.value })}
                   placeholder="gemini-3.1-flash-lite"
+                  className="w-full px-3 py-1.5 text-xs rounded-md bg-neutral-950 border border-neutral-700 text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-400 mb-1">Base URL (optional, or env: VITE_GEMINI_BASE_URL)</label>
+                <input
+                  type="text"
+                  value={modelSettings.baseUrl || ""}
+                  onChange={(e) => setModelSettings({ ...modelSettings, baseUrl: e.target.value })}
+                  placeholder="https://generativelanguage.googleapis.com"
                   className="w-full px-3 py-1.5 text-xs rounded-md bg-neutral-950 border border-neutral-700 text-white"
                 />
                 <p className="mt-1 text-[11px] text-emerald-300">

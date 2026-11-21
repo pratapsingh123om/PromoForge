@@ -27,6 +27,7 @@ class GeminiProvider(LLMProvider):
         *,
         api_key: str,
         model: str,
+        base_url: str = "",
         temperature: float = 0.1,
         max_tokens: int = 4096,
         timeout_seconds: int = 60,
@@ -37,11 +38,16 @@ class GeminiProvider(LLMProvider):
         if not model:
             raise ValueError("LLM_MODEL is required")
         self.model = model
+        self.base_url = base_url
         self.temperature = temperature
         self.max_tokens = max_tokens
+        http_opts = types.HttpOptions(
+            timeout=timeout_seconds * 1000,
+            base_url=base_url if base_url else None,
+        )
         self._client = client or genai.Client(
             api_key=api_key,
-            http_options=types.HttpOptions(timeout=timeout_seconds * 1000),
+            http_options=http_opts,
         )
 
     async def generate_structured(

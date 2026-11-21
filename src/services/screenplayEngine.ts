@@ -176,10 +176,35 @@ export function promosConflict(left: PromoCandidateItem, right: PromoCandidateIt
   const rightSegment = right.segments[0];
   const leftToRightGap = rightSegment.start_ms - leftSegment.end_ms;
   const rightToLeftGap = leftSegment.start_ms - rightSegment.end_ms;
-  return (
+
+  // Direct temporal continuation (within 3.5s)
+  if (
     (leftToRightGap >= 0 && leftToRightGap <= 3500) ||
     (rightToLeftGap >= 0 && rightToLeftGap <= 3500)
-  );
+  ) {
+    return true;
+  }
+
+  // Question-and-answer continuation check:
+  // If one promo ends on a question/cliffhanger, and the other promo starts on the answering dialogue
+  if (leftSegment.end_ms <= rightSegment.start_ms && leftToRightGap <= 8000) {
+    if (
+      left.cliffhanger_line.includes("?") ||
+      /\b(how|what|why|who|where|when|can|will|are|is|do|did)\b/i.test(left.cliffhanger_line)
+    ) {
+      return true;
+    }
+  }
+  if (rightSegment.end_ms <= leftSegment.start_ms && rightToLeftGap <= 8000) {
+    if (
+      right.cliffhanger_line.includes("?") ||
+      /\b(how|what|why|who|where|when|can|will|are|is|do|did)\b/i.test(right.cliffhanger_line)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function parseScreenplayText(
@@ -847,6 +872,7 @@ export interface SeriesRankingOptions {
   varietyCap?: number;
   qualityThreshold?: number;
   topLimit?: number;
+  totalEpisodes?: number;
 }
 
 export interface GlobalRankingResult {
@@ -872,21 +898,38 @@ export function rankAllEpisodesGlobally(
   const qualityThreshold = options.qualityThreshold ?? (mode === "series" ? 70.0 : 0.0);
   const topLimit = options.topLimit ?? (mode === "series" ? 25 : 3);
 
+  // Determine series episode distribution dynamically (no hardcoded episode counts)
+  const uniqueEpisodes = Array.from(new Set(allPromos.map((p) => p.episode)));
+  const sortedEpisodes = [...uniqueEpisodes].sort((a, b) => {
+    const numA = parseInt((/(\d+)/.exec(a) || [0, 0])[1] as string, 10);
+    const numB = parseInt((/(\d+)/.exec(b) || [0, 0])[1] as string, 10);
+    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+    return a.localeCompare(b);
+  });
+  const epIndexMap = new Map<string, number>();
+  sortedEpisodes.forEach((ep, idx) => epIndexMap.set(ep, idx + 1));
+
+  const parsedNumbers = sortedEpisodes
+    .map((ep) => parseInt((/(\d+)/.exec(ep) || [0, 0])[1] as string, 10))
+    .filter((n) => !isNaN(n) && n > 0);
+  const maxParsedEp = parsedNumbers.length > 0 ? Math.max(...parsedNumbers) : sortedEpisodes.length;
+  const totalEpisodeCount = options.totalEpisodes ?? Math.max(sortedEpisodes.length, maxParsedEp, 1);
+
+  const earlyEpisodeCutoff = Math.max(1, Math.ceil(totalEpisodeCount * 0.30));
+  const lateEpisodeCutoff = Math.floor(totalEpisodeCount * 0.80);
+
   // Calculate acquisition score & detect spoiler risks
   const scoredPool = allPromos.map((p) => {
-    const epNumMatch = /EP_?(\d+)/i.exec(p.episode);
-    const epNum = epNumMatch ? parseInt(epNumMatch[1], 10) : 1;
+    const parsedNum = parseInt((/(\d+)/.exec(p.episode) || [0, 0])[1] as string, 10);
+    const epIndex = (!isNaN(parsedNum) && parsedNum > 0) ? parsedNum : (epIndexMap.get(p.episode) ?? 1);
     let acquisitionBonus = 0;
     const flags = [...p.quality_flags];
 
-    if (mode === "series" && epNum <= 15) {
-      // Early episodes: optimal for cold-audience viewer acquisition
+    if (mode === "series" && epIndex <= earlyEpisodeCutoff) {
+      // Early episodes (first 30%): optimal for cold-audience viewer acquisition
       acquisitionBonus += 5;
-    } else if (mode === "series" && epNum <= 30) {
-      // Mid episodes: good context-to-drama balance
-      acquisitionBonus += 2;
-    } else if (mode === "series" && epNum >= 40) {
-      // Late episodes: high risk of spoiling series reveals or requiring prior narrative context
+    } else if (mode === "series" && epIndex > lateEpisodeCutoff) {
+      // Late episodes (last 20%): high risk of spoiling series reveals or requiring prior narrative context
       acquisitionBonus -= 6;
       if (!flags.includes("late-series spoiler risk")) {
         flags.push("late-series spoiler risk");
@@ -894,6 +937,9 @@ export function rankAllEpisodesGlobally(
       if (p.scores.standalone < 80 && !flags.includes("requires series context")) {
         flags.push("requires series context");
       }
+    } else if (mode === "series") {
+      // Mid episodes (middle 50%): good context-to-drama balance
+      acquisitionBonus += 2;
     }
 
     const acquisitionScore = Number(Math.max(0, Math.min(100, p.scores.decision + acquisitionBonus)).toFixed(1));

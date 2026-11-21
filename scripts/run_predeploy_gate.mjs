@@ -272,6 +272,103 @@ check("ranking score exposes series adjustment and drives order", () => {
   assert.ok(result.whyTop10.every((reason) => reason.includes(ranked[0].why_it_works)));
 });
 
+check("A1 proportional series adjustment (20-ep and 80-ep fixtures)", () => {
+  // 20-episode fixture
+  const promos20 = [];
+  for (let i = 1; i <= 20; i++) {
+    const ep = `EP_${String(i).padStart(3, "0")}`;
+    promos20.push({
+      ...ranked[0],
+      id: `P_${ep}`,
+      candidate_key: `P_${ep}`,
+      episode: ep,
+      segments: [{ ...ranked[0].segments[0], episode: ep }],
+      scores: { hook: 80, cliffhanger: 80, standalone: 80, decision: 80 },
+      quality_flags: [],
+    });
+  }
+  const result20 = rankAllEpisodesGlobally(promos20, { mode: "series", qualityThreshold: 0, topLimit: 30 });
+  const map20 = new Map(result20.ranked.map((p) => [p.episode, p]));
+  // In 20 eps: 30% = 6. Ep 6 gets +5; Ep 7 gets +2.
+  assert.equal(map20.get("EP_006").ranking_adjustment, 5, "EP_006 should receive early bonus (+5)");
+  assert.equal(map20.get("EP_007").ranking_adjustment, 2, "EP_007 should receive mid bonus (+2)");
+  // Last 20% = 4 (eps 17..20). Ep 16 gets +2; Ep 17 gets -6 and late-series flag.
+  assert.equal(map20.get("EP_016").ranking_adjustment, 2, "EP_016 should receive mid bonus (+2)");
+  assert.equal(map20.get("EP_017").ranking_adjustment, -6, "EP_017 should receive late penalty (-6)");
+  assert.ok(map20.get("EP_017").quality_flags.includes("late-series spoiler risk"), "EP_017 should carry late spoiler risk flag");
+
+  // 80-episode fixture
+  const promos80 = [];
+  for (let i = 1; i <= 80; i++) {
+    const ep = `EP_${String(i).padStart(3, "0")}`;
+    promos80.push({
+      ...ranked[0],
+      id: `P_${ep}`,
+      candidate_key: `P_${ep}`,
+      episode: ep,
+      segments: [{ ...ranked[0].segments[0], episode: ep }],
+      scores: { hook: 80, cliffhanger: 80, standalone: 80, decision: 80 },
+      quality_flags: [],
+    });
+  }
+  const result80 = rankAllEpisodesGlobally(promos80, { mode: "series", qualityThreshold: 0, topLimit: 90 });
+  const map80 = new Map(result80.ranked.map((p) => [p.episode, p]));
+  // In 80 eps: 30% = 24. Ep 24 gets +5; Ep 25 gets +2.
+  assert.equal(map80.get("EP_024").ranking_adjustment, 5, "EP_024 should receive early bonus (+5)");
+  assert.equal(map80.get("EP_025").ranking_adjustment, 2, "EP_025 should receive mid bonus (+2)");
+  // Last 20% = 16 (eps 65..80). Ep 64 gets +2; Ep 65 gets -6 and late-series flag.
+  assert.equal(map80.get("EP_064").ranking_adjustment, 2, "EP_064 should receive mid bonus (+2)");
+  assert.equal(map80.get("EP_065").ranking_adjustment, -6, "EP_065 should receive late penalty (-6)");
+  assert.ok(map80.get("EP_065").quality_flags.includes("late-series spoiler risk"), "EP_065 should carry late spoiler risk flag");
+  return "20-ep and 80-ep proportional early/late adjustments verified";
+});
+
+check("A3 dialogue-slice rule against 0.1s and 0.2s overlaps", () => {
+  const dummyEvents = [
+    {
+      event_id: "E01",
+      type: "dialogue",
+      speaker: "ALICE",
+      text: "This is a spoken line.",
+      start_ms: 10_000,
+      end_ms: 15_000,
+    },
+  ];
+  // Start exactly 0.2s before line's end (14800ms)
+  assert.equal(boundarySlicesDialogue(dummyEvents, 14_800), true, "Start 0.2s before line end must be sliced");
+  // Start exactly 0.1s before line's end (14900ms)
+  assert.equal(boundarySlicesDialogue(dummyEvents, 14_900), true, "Start 0.1s before line end must be sliced");
+  // Exact boundaries must not be sliced
+  assert.equal(boundarySlicesDialogue(dummyEvents, 10_000), false, "Exact line start must not be sliced");
+  assert.equal(boundarySlicesDialogue(dummyEvents, 15_000), false, "Exact line end must not be sliced");
+  return "Sub-second 0.1s/0.2s dialogue slice boundaries strictly rejected";
+});
+
+check("A4 same-episode continuation: question-reply pair (EP_001)", () => {
+  const promoQuestion = {
+    ...ranked[0],
+    id: "EP_001_P_QUESTION",
+    candidate_key: "EP_001_P_QUESTION",
+    episode: "EP_001",
+    cliffhanger_line: "Where did he hide the key?",
+    cliffhanger_speaker: "SPEAKER_A",
+    segments: [{ ...ranked[0].segments[0], episode: "EP_001", start_ms: 10_000, end_ms: 35_000, duration_seconds: 25 }],
+    scores: { hook: 85, cliffhanger: 90, standalone: 80, decision: 85 },
+  };
+  const promoAnswer = {
+    ...ranked[0],
+    id: "EP_001_P_ANSWER",
+    candidate_key: "EP_001_P_ANSWER",
+    episode: "EP_001",
+    hook_line: "In a place you will never search.",
+    hook_speaker: "SPEAKER_B",
+    segments: [{ ...ranked[0].segments[0], episode: "EP_001", start_ms: 36_000, end_ms: 65_000, duration_seconds: 29 }],
+    scores: { hook: 88, cliffhanger: 85, standalone: 80, decision: 86 },
+  };
+  assert.equal(promosConflict(promoQuestion, promoAnswer), true, "EP_001 answer promo must conflict with previous question promo");
+  return "EP_001 question-reply continuation pair successfully detected and suppressed";
+});
+
 check("4.11 reasons are clip-specific", () => {
   assert.ok(ranked.every((promo) => promo.why_it_works.split(/\s+/).length >= 8));
   assert.ok(ranked.every((promo) => !/^score\s+\d+/i.test(promo.why_it_works)));
