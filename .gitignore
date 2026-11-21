@@ -17,6 +17,7 @@ htmlcov/
 /data/
 outputs/
 exports/
+expo/
 *.db
 *.sqlite
 *.sqlite3

@@ -134,4 +134,4 @@ Then whose signature is on this death certificate?
 
 --- SCRIPT END ---`;
 
-export const SAMPLE_SHOW_NAME = "The Sterling Takeover";
+export const SAMPLE_SHOW_NAME = "Thorne Banquet Sample";

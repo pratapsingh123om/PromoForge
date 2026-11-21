@@ -2,6 +2,16 @@ import type { PromoCandidateItem, RunCheckSummary } from "./screenplayEngine";
 import { PRODUCT_NAME } from "../config.js";
 
 export const MAX_MODEL_CANDIDATES = 12;
+export const SERIES_MODEL_CANDIDATES = 70;
+export const MODEL_BATCH_SIZE = 10;
+
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
 
 export function shortlistCandidatesForModel(
   candidates: PromoCandidateItem[],
@@ -38,6 +48,9 @@ export interface DemoRunRecord {
   language: string;
   target_audience: string | null;
   episode_count: number;
+  mode?: "series" | "episode";
+  why_top_10?: string[];
+  candidates_evaluated_count?: number;
   parameters: {
     min_duration_seconds: number;
     max_duration_seconds: number;
@@ -173,16 +186,67 @@ export function createRunExportFiles(
     why_top_3_ranking: whyTop3,
     promos,
   };
+  // OTIO (OpenTimelineIO) JSON export
+  const otioClips = promos.flatMap((promo) =>
+    promo.segments.map((segment) => ({
+      OTIO_SCHEMA: "Clip.1",
+      name: `${promo.candidate_key} (${segment.episode})`,
+      source_range: {
+        OTIO_SCHEMA: "TimeRange.1",
+        start_time: {
+          OTIO_SCHEMA: "RationalTime.1",
+          value: Math.round(segment.start_ms / (1000 / 30)),
+          rate: 30,
+        },
+        duration: {
+          OTIO_SCHEMA: "RationalTime.1",
+          value: Math.round(segment.duration_seconds * 30),
+          rate: 30,
+        },
+      },
+      metadata: {
+        promoforge: {
+          promo_id: promo.candidate_key,
+          episode: segment.episode,
+          start_clock: segment.start_clock,
+          end_clock: segment.end_clock,
+          note: "Screenplay-only cut plan. Not tested on footage because the pack is screenplays only.",
+        },
+      },
+    })),
+  );
+  const otio = {
+    OTIO_SCHEMA: "Timeline.1",
+    name: `${PRODUCT_NAME}_${run.run_id}`,
+    metadata: {
+      promoforge: {
+        note: "Screenplay-only cut plan. Not tested on footage because the pack is screenplays only.",
+      },
+    },
+    tracks: {
+      OTIO_SCHEMA: "Stack.1",
+      children: [
+        {
+          OTIO_SCHEMA: "Track.1",
+          name: "V1",
+          kind: "Video",
+          children: otioClips,
+        },
+      ],
+    },
+  };
+
   const files: RunExportFile[] = [
     { path: "promos_master.csv", content: `${masterHeader}\n${masterRows.join("\n")}\n` },
     { path: "cut_list.csv", content: `${cutHeader}\n${cutRows.join("\n")}\n` },
     { path: "promos.json", content: JSON.stringify(fullOutput, null, 2) },
     { path: "report.md", content: report },
     { path: "promos.edl", content: edl },
+    { path: "promos.otio", content: JSON.stringify(otio, null, 2) },
     { path: "run_log.json", content: JSON.stringify(run, null, 2) },
     {
       path: "TIMELINE_NOTES.txt",
-      content: "Screenplay-only cut plan. The source pack contains no video or audio, so this EDL has not been conformed against production footage.\n",
+      content: "Screenplay-only cut plan. The source pack contains no video or audio, so this EDL and OTIO have not been conformed against production footage.\n",
     },
   ];
   if (run.raw_model_responses.length === 0) {

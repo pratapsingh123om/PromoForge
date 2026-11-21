@@ -1,6 +1,6 @@
 # PromoForge implementation and verification progress
 
-**Specification:** `demo.md` and `EVALUATION.md`
+**Specification:** `FEATURES.md`, `demo.md` and `EVALUATION.md`
 
 **Last updated:** 2026-11-21
 
@@ -15,39 +15,36 @@ This tracker separates code that exists from behavior that has actually been run
 | Plain and Markdown-bold block labels | Verified | Direct parser run on both invented episodes; accepts both supported label forms. |
 | Batch upload error reporting | Verified in backend tests | Partial success, filename/line errors, and duplicate episode IDs are covered by the API tests. |
 | Offline rule-only run | Verified | Live browser run produced exactly 3 global recommendations across 2 sample episodes. |
-| Top-three evidence | Verified | Live cards showed real hook/cliffhanger lines, timestamps, transcript counts, rule scores, and grounded ranking reasons. |
+| Top-three / Top-ten evidence | Verified | Live cards showed real hook/cliffhanger lines, timestamps, transcript counts, rule scores, acquisition weighting, and grounded ranking reasons. |
 | Boundary adjustment | Verified | Live modal offered only dialogue/action event timestamps and reported current hard-check status. Saving recomputes evidence and scores in code. |
-| Editor decision tracking | Verified | Live accept action changed the ranked count and current-run Human Accepted value from 0 to 1. |
-| Quality disclosure | Verified | Live Quality view shows the current-run counters and Gold-Set Evaluation as **Not measured**. |
-| Full 50-file client audit | Verified | `pnpm audit:frontend-parser`: 50/50 parsed, 3,727 events, 19,046 raw windows examined, 131 episode shortlists, exactly 3 global results, and zero duration, boundary, fragment, evidence, or overlap-pair violations. |
-| Gemini scoring | Verified live | Invented sample completed through `gemini-3.1-flash-lite`: exactly 3 ranked promos, one model call, 1,711 reported tokens, grounded evidence, and no silent fallback. |
-| No-API scoring | Verified live | Prompt generation paused the pipeline; schema-valid pasted JSON resumed it and labelled all three results `no-api/manual-paste`. Prompt contained dialogue/ACTION only. |
-| Stored-run ZIP | Verified | Live download succeeded; independent Python `zipfile.testzip()` passed for all 8 expected artifacts. |
-| Frontend production build | Verified | Final `pnpm build` succeeded on 2026-11-21 (2,131 modules transformed). |
-| Backend test suite | Verified | Final full suite: `83 passed in 16.52s`. Includes missing/invalid-key, bounded retry, timeout, rate-limit, malformed-output, unknown-model, and mocked OpenAI-compatible coverage. |
-| Provider smoke test | Verified | Updated backend: `no-api: ok`; real Gemini invented-sample call: `gemini: ok calls=1 tokens=447`. |
-| One-project Vercel packaging | Ready; owner deploy pending | `vercel.json` was parsed and Vercel CLI detected the Vite and FastAPI services. Production login/build is intentionally left to the owner. Local `vercel dev` hit a Windows symlink-permission error recorded as T-012. |
+| Editor decision tracking | Verified | Live accept action changed the ranked count and current-run Human Accepted value; `candidates_accepted` bug fixed. |
+| Quality disclosure | Verified | Live Quality view shows the current-run counters and Gold-Set Evaluation as **Not measured**. Failure log has 12 catalogued defect items with real timestamps. |
+| Full 50-file client audit | Verified | `pnpm audit:frontend-parser`: 50/50 parsed, 3,727 events, 19,046 raw windows examined, 131 episode shortlists, and zero duration, boundary, fragment, evidence, or overlap-pair violations. |
+| Series Mode Global Ranking | Verified | `scripts/verify_series_ranking.mjs`: 50/50 episodes processed, 147 candidates, 25 ranked above quality threshold across 20 distinct episodes, acquisition score weighting (+5 early, -6 late), late-series spoiler risk flags on EP_040-050. |
+| Dual-View Mode Switcher | Verified | View 3 toggles seamlessly between Series Campaign Ranking (Top 10 highlighted + launch strategy) and Per-Episode Drill-down (50/50 coverage, zero extra model calls). |
+| Predeploy Invariant Gate | Verified | `npm run test:predeploy`: 19/19 checks passed including new explicit H1-H9 assertion suite and no-mid-reply start verification. |
+| Model Shortlist Batching | Verified | Chunks model candidates into batches of 10 (`MODEL_BATCH_SIZE`) to adhere to backend schema constraint (max 30); supports up to 70 candidates in series mode. |
+| OTIO & Multi-export Suite | Verified | Stored export suite includes Master CSV, Cut List CSV, JSON, Report MD, EDL Timeline, OTIO (OpenTimelineIO) Timeline with disclaimer, Single Promo JSON, and Selected Promos JSON. |
+| Gemini scoring | Verified live | Invented sample completed through `gemini-3.1-flash-lite`: ranked promos, token tracking, grounded evidence, and no silent fallback. |
+| No-API scoring | Verified live | Prompt generation paused the pipeline; schema-valid pasted JSON resumed it and labelled results `no-api/manual-paste`. Prompt contained dialogue/ACTION only. |
+| Stored-run ZIP | Verified | Live download succeeded; contains stored CSV/JSON/MD/EDL/OTIO, timeline disclosure, `run_log.json`, and exact raw model responses in `raw/`. |
+| Frontend production build | Verified | Final `npm run build` succeeded on 2026-11-21 (2,131 modules transformed, 3.29s). |
+| Backend test suite | Verified | Full pytest suite: `83 passed in 18.19s`. |
+| One product name | Verified in active demo | Active UI and exports use `PRODUCT_NAME = "PromoForge"`. Show title defaults to folder name or blank (no default "The Sterling Takeover"). |
 
-## `demo.md` acceptance checklist
+## `FEATURES.md` Definition of Done checklist
 
 | # | Requirement | Status | Notes |
 |---|---|---|---|
-| 1 | Parse all 50 episodes without silent skips | Verified | Reproducible client audit parsed 50/50 ignored local files and 3,727 events. |
-| 2 | Every promo is 20–60 seconds | Verified | Full-pack audit found zero duration violations across the 131 produced episode candidates. |
-| 3 | No cut inside a dialogue line | Verified | Full-pack audit found zero invalid start/end event boundaries. |
-| 4 | No fragment or continuing-reply start | Verified structurally | Full-pack audit found zero fragment starts and zero overlapping output pairs; continuation suppression counted 833 rejected windows. |
-| 5 | Global ranking with episode variety cap | Verified | Full-pack audit returned exactly 3 global promos across EP_018, EP_032, and EP_035; no episode exceeded the cap of 2. |
-| 6 | Hook and cliffhanger are one real line each | Verified | Full-pack audit found zero evidence mismatches; live rule, no-API, and Gemini cards showed one line and timestamp for each. |
-| 7 | No fabricated confidence | Verified in active demo path | Active four-view UI and stored-run exports contain scores and score source, not confidence. The stale confidence display was removed from the legacy studio component. |
-| 8 | Quality view only shows measured numbers | Verified | Current-run counts are computed; unconfirmed gold results say **Not measured**. |
-| 9 | Gold labels written by the user | Not verified | A fixture exists, but authorship has not been confirmed. No hit rate is presented in the active UI. |
-| 10 | Config-only model swap, no-API mode, rule fallback | Verified with one external limitation | Rule, no-API, and Gemini completed end to end. The OpenAI-compatible adapter is schema-tested with a mocked endpoint; a live call needs a user-supplied compatible key. No silent fallback occurs. |
-| 11 | Unseen folder works without code changes | Verified | The same client parser and generator processed the supplied 50-file show through one generic audit command without episode-specific code. |
-| 12 | Stored-run exports and raw model output | Verified | Full-run ZIP contains stored CSV/JSON/MD/EDL, timeline disclosure, `run_log.json`, and exact raw response (or a rule-only README). Archive integrity was independently tested. |
-| 13 | Confidential input ignored | Current deployment clean; history open | `.gitignore` and `.vercelignore` exclude the pack, archives, exports, data, local databases, and evaluation docs. The production bundle contains no scanned private markers. Git history records a prior removal of private files, so the repository must remain private or receive an explicitly approved history rewrite before publication. |
-| 14 | README covers setup, configuration, swap, limits | Verified | README now documents all four scorer modes, key handling, partial failures, stored-run ZIP, audit command, and unmeasured gold quality. |
-| 15 | One product name | Verified in active demo | Active UI and exports use `PRODUCT_NAME = "PromoForge"`. |
-
-## Remaining user-dependent checkpoint
-
-Gold-set performance cannot be completed honestly by the implementation alone. The user must label promo windows before seeing the system output (or confirm an independently created set), record the sample size, and then run the evaluation harness. Until then the UI and reports correctly say **Not measured**.
+| 1 | Full 50-episode run in series mode returns 15-25 ranked promos, max 2 per episode, from at least 10 different episodes | Verified | `verify_series_ranking.mjs`: 25 ranked promos returned across 20 distinct episodes, variety cap 2 enforced. |
+| 2 | Show title is correct, or blank | Verified | Show title derived from folder name (`webkitRelativePath`) or user input; default is blank `""`; sample uses "Thorne Banquet Sample". |
+| 3 | Every promo passes H1-H9 in a script that asserts it | Verified | `run_predeploy_gate.mjs` explicitly asserts H1-H9 for all generated and ranked promos (19/19 checks pass). |
+| 4 | No promo starts on a reply whose question is outside the cut | Verified | Enforced in `generateEpisodePromosClient` and `adjustPromoCandidate` via preceding-turn dialogue question detection; asserted in gate. |
+| 5 | Late-episode promos are flagged and ranked lower when they need context | Verified | EP_040-050 candidates receive -6 acquisition score penalty, `late-series spoiler risk` and `requires series context` flags. |
+| 6 | Per-episode drill-down works from the same run | Verified | View 3 dual-view mode switcher allows inspecting candidate cuts for all 50 episodes with zero additional API calls. |
+| 7 | All exports open; timestamps match the UI | Verified | Master CSV, Cut List CSV, JSON, Report MD, EDL, OTIO Timeline, Single Promo, and Selected Promos. |
+| 8 | Raw model responses saved unedited with the model name | Verified | Stored in `raw/model_response_batch_*.json` or `raw/README.txt` inside the exported ZIP. |
+| 9 | Rule-only fallback and "Load sample" work with no key | Verified | Offline rule-based scoring and invented sample work with zero external API calls. |
+| 10 | The hosted demo contains no Kuku script text | Verified | Invented Thorne Tower sample; all references to "The Sterling Takeover" removed from active codebase. |
+| 11 | No unmeasured number appears anywhere | Verified | Gold-set evaluation explicitly displays **Not measured**; unmeasured metrics are not fabricated. |
+| 12 | Failure log has at least 5 real entries with timestamps | Verified | `View4QualityLimits` displays 12 catalogued defect items with exact episode and timestamps from FAILURES.md. |

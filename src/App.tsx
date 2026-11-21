@@ -21,6 +21,8 @@ import {
   generateEpisodePromosClient,
   rankAllEpisodesGlobally,
   adjustPromoCandidate,
+  buildSeriesAliasMap,
+  applySeriesAliasMapToEpisodes,
   type ParsedEpisode,
   type PromoCandidateItem,
   type RunCheckSummary,
@@ -35,10 +37,14 @@ import type {
   DemoScoreCandidateInput,
   DemoScorePromptResponse,
   DemoScoreResponse,
+  DemoModelScore,
   BackendHealthResponse,
 } from "./types";
 import {
   MAX_MODEL_CANDIDATES,
+  SERIES_MODEL_CANDIDATES,
+  MODEL_BATCH_SIZE,
+  chunkArray,
   shortlistCandidatesForModel,
   type DemoRunRecord,
 } from "./services/demoRun";
@@ -151,7 +157,7 @@ export default function App() {
   const [rankedPromos, setRankedPromos] = useState<PromoCandidateItem[]>(() => {
     try {
       const saved = sessionStorage.getItem("pf-ranked-promos");
-      return saved ? (JSON.parse(saved) as PromoCandidateItem[]).slice(0, 3) : [];
+      return saved ? (JSON.parse(saved) as PromoCandidateItem[]) : [];
     } catch {
       return [];
     }
@@ -163,6 +169,24 @@ export default function App() {
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
+    }
+  });
+
+  const [whyTop10, setWhyTop10] = useState<string[]>(() => {
+    try {
+      const saved = sessionStorage.getItem("pf-why-top10");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [allCandidatesByEpisode, setAllCandidatesByEpisode] = useState<Record<string, PromoCandidateItem[]>>(() => {
+    try {
+      const saved = sessionStorage.getItem("pf-all-candidates-by-ep");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
     }
   });
 
@@ -213,13 +237,15 @@ export default function App() {
       sessionStorage.setItem("pf-parsed-episodes", JSON.stringify(parsedEpisodes));
       sessionStorage.setItem("pf-ranked-promos", JSON.stringify(rankedPromos));
       sessionStorage.setItem("pf-why-top3", JSON.stringify(whyTop3));
+      sessionStorage.setItem("pf-why-top10", JSON.stringify(whyTop10));
+      sessionStorage.setItem("pf-all-candidates-by-ep", JSON.stringify(allCandidatesByEpisode));
       sessionStorage.setItem("pf-run-summary", JSON.stringify(runSummary));
       if (runRecord) sessionStorage.setItem("pf-run-record", JSON.stringify(runRecord));
       else sessionStorage.removeItem("pf-run-record");
     } catch {
       // Ignore quota errors
     }
-  }, [showTitle, parsedEpisodes, rankedPromos, whyTop3, runSummary, runRecord]);
+  }, [showTitle, parsedEpisodes, rankedPromos, whyTop3, whyTop10, allCandidatesByEpisode, runSummary, runRecord]);
 
   const toScoreCandidates = (candidates: PromoCandidateItem[]): DemoScoreCandidateInput[] =>
     candidates.map((candidate) => ({
@@ -295,11 +321,23 @@ export default function App() {
     status: DemoRunRecord["status"];
     errors?: string[];
   }) => {
-    const { ranked, whyTop3: top3Reasons } = rankAllEpisodesGlobally(candidates, 2);
+    const isSeriesMode = parsedEpisodes.length > 1;
+    const mode = isSeriesMode ? "series" : "episode";
+    const {
+      ranked,
+      whyTop3: top3Reasons,
+      whyTop10: top10Reasons,
+      allCandidatesByEpisode: epMap,
+    } = rankAllEpisodesGlobally(candidates, {
+      mode,
+      varietyCap: 2,
+      qualityThreshold: isSeriesMode ? 70.0 : 0.0,
+      topLimit: isSeriesMode ? 25 : 3,
+    });
     const wallTimeSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(2));
     const completedSummary: RunCheckSummary = {
       ...summary,
-      candidates_accepted: 0,
+      candidates_accepted: ranked.length,
       model_calls: scoreResponse?.model_calls ?? 0,
       wall_time_seconds: wallTimeSeconds,
     };
@@ -308,15 +346,18 @@ export default function App() {
       status,
       created_at: createdAt,
       completed_at: new Date().toISOString(),
-      show_title: showTitle || "Untitled show",
+      show_title: showTitle || "",
       language: context.language,
       target_audience: context.targetAudience.trim() || null,
       episode_count: parsedEpisodes.length,
+      mode,
+      why_top_10: top10Reasons,
+      candidates_evaluated_count: candidates.length,
       parameters: {
         min_duration_seconds: minDuration,
         max_duration_seconds: maxDuration,
         variety_cap: 2,
-        model_shortlist_limit: MAX_MODEL_CANDIDATES,
+        model_shortlist_limit: isSeriesMode ? SERIES_MODEL_CANDIDATES : MAX_MODEL_CANDIDATES,
         model_candidates_scored: modelCandidatesScored,
       },
       model: {
@@ -341,6 +382,14 @@ export default function App() {
     };
     setRankedPromos(ranked);
     setWhyTop3(top3Reasons);
+    setWhyTop10(top10Reasons);
+    setAllCandidatesByEpisode(epMap);
+    try {
+      sessionStorage.setItem("pf-why-top10", JSON.stringify(top10Reasons));
+      sessionStorage.setItem("pf-all-candidates-by-ep", JSON.stringify(epMap));
+    } catch {
+      // ignore
+    }
     setRunSummary(completedSummary);
     setRunRecord(record);
     sessionStorage.removeItem("pf-run-in-progress");
@@ -428,6 +477,13 @@ export default function App() {
 
       if (s === 1) {
         // Generate Candidates stage
+        const isSeriesMode = parsedEpisodes.length > 1;
+        if (isSeriesMode) {
+          const aliasMap = buildSeriesAliasMap(parsedEpisodes);
+          applySeriesAliasMapToEpisodes(parsedEpisodes, aliasMap);
+        }
+        const perEpLimit = isSeriesMode ? 5 : 3;
+
         for (const ep of parsedEpisodes) {
           if (cancelRequestedRef.current) {
             cancelled = true;
@@ -441,7 +497,7 @@ export default function App() {
               stage: "Generating Cuts",
             },
           }));
-          const cands = generateEpisodePromosClient(ep, minDuration, maxDuration, summary);
+          const cands = generateEpisodePromosClient(ep, minDuration, maxDuration, summary, perEpLimit);
           allCandidates.push(...cands);
           setProgressStates((prev) => ({
             ...prev,
@@ -457,16 +513,19 @@ export default function App() {
       }
 
       if (s === 2 && modelSettings.provider !== "fallback" && allCandidates.length > 0) {
-        const modelCandidates = shortlistCandidatesForModel(allCandidates);
-        modelCandidatesScored = modelCandidates.length;
-        allCandidates.splice(0, allCandidates.length, ...modelCandidates);
-        const promptPayload = {
-          show_title: showTitle || "Untitled show",
-          language: context.language,
-          target_audience: context.targetAudience.trim() || null,
-          candidates: toScoreCandidates(allCandidates),
-        };
+        const isSeriesMode = parsedEpisodes.length > 1;
+        const shortlistLimit = isSeriesMode ? SERIES_MODEL_CANDIDATES : MAX_MODEL_CANDIDATES;
+        const candidatesToScore = shortlistCandidatesForModel(allCandidates, shortlistLimit);
+        modelCandidatesScored = candidatesToScore.length;
+
         if (modelSettings.provider === "no-api") {
+          const noApiCandidates = candidatesToScore.slice(0, 30);
+          const promptPayload = {
+            show_title: showTitle || "",
+            language: context.language,
+            target_audience: context.targetAudience.trim() || null,
+            candidates: toScoreCandidates(noApiCandidates),
+          };
           try {
             const prompt = await api.createDemoScoringPrompt(promptPayload);
             stageTimingsMs[STAGES[s]] = Math.round(performance.now() - stageStarted);
@@ -496,21 +555,83 @@ export default function App() {
         }
 
         try {
-          scoreResponse = await api.runDemoScoring({
-            ...promptPayload,
-            model: {
-              provider: modelSettings.provider,
-              model: modelSettings.modelName,
-              base_url: modelSettings.baseUrl,
-              api_key: modelSettings.apiKey || undefined,
-              temperature: modelSettings.temperature,
-              max_tokens: modelSettings.maxTokens,
-            },
-          });
-          const scored = applyModelScores(allCandidates, scoreResponse);
-          allCandidates.splice(0, allCandidates.length, ...scored);
-          setModelCallsCount(scoreResponse.model_calls);
-          setTokenCount((scoreResponse.input_tokens ?? 0) + (scoreResponse.output_tokens ?? 0));
+          const batches = chunkArray(candidatesToScore, MODEL_BATCH_SIZE);
+          const accumulatedScores: DemoModelScore[] = [];
+          const rawResponses: Array<{ filename: string; content: string }> = [];
+          let totalInputTokens = 0;
+          let totalOutputTokens = 0;
+          let totalCost = 0;
+          let totalCalls = 0;
+          let totalRetries = 0;
+          let lastPromptSha = "";
+
+          for (let b = 0; b < batches.length; b++) {
+            if (cancelRequestedRef.current) {
+              cancelled = true;
+              break stageLoop;
+            }
+            const batch = batches[b];
+            const batchPromptPayload = {
+              show_title: showTitle || "",
+              language: context.language,
+              target_audience: context.targetAudience.trim() || null,
+              candidates: toScoreCandidates(batch),
+              model: {
+                provider: modelSettings.provider,
+                model: modelSettings.modelName,
+                base_url: modelSettings.baseUrl,
+                api_key: modelSettings.apiKey || undefined,
+                temperature: modelSettings.temperature,
+                max_tokens: modelSettings.maxTokens,
+              },
+            };
+            const batchResp = await api.runDemoScoring(batchPromptPayload);
+            accumulatedScores.push(...batchResp.scores);
+            rawResponses.push({
+              filename: `model_response_batch_${b + 1}.json`,
+              content: batchResp.raw_response,
+            });
+            totalInputTokens += batchResp.input_tokens ?? 0;
+            totalOutputTokens += batchResp.output_tokens ?? 0;
+            totalCost += batchResp.estimated_cost ?? 0;
+            totalCalls += batchResp.model_calls;
+            totalRetries += batchResp.retries ?? 0;
+            lastPromptSha = batchResp.prompt_sha256;
+
+            setModelCallsCount(totalCalls);
+            setTokenCount(totalInputTokens + totalOutputTokens);
+
+            // Apply model scores to allCandidates pool incrementally
+            const batchScoreResponse: DemoScoreResponse = {
+              provider: batchResp.provider,
+              model: batchResp.model,
+              scores: batchResp.scores,
+              model_calls: batchResp.model_calls,
+              input_tokens: batchResp.input_tokens,
+              output_tokens: batchResp.output_tokens,
+              estimated_cost: batchResp.estimated_cost,
+              latency_ms: batchResp.latency_ms,
+              retries: batchResp.retries ?? 0,
+              prompt_sha256: batchResp.prompt_sha256,
+              raw_response: batchResp.raw_response,
+            };
+            const scoredPool = applyModelScores(allCandidates, batchScoreResponse);
+            allCandidates.splice(0, allCandidates.length, ...scoredPool);
+          }
+
+          scoreResponse = {
+            provider: modelSettings.provider,
+            model: modelSettings.modelName,
+            scores: accumulatedScores,
+            model_calls: totalCalls,
+            input_tokens: totalInputTokens,
+            output_tokens: totalOutputTokens,
+            estimated_cost: Number(totalCost.toFixed(6)),
+            latency_ms: Math.round(performance.now() - stageStarted),
+            retries: totalRetries,
+            prompt_sha256: lastPromptSha,
+            raw_response: JSON.stringify(accumulatedScores, null, 2),
+          };
         } catch (error) {
           modelError = error instanceof Error ? error.message : String(error);
           for (const episode of parsedEpisodes) {
@@ -587,7 +708,7 @@ export default function App() {
     setManualError("");
     try {
       const response = await api.runDemoScoring({
-        show_title: showTitle || "Untitled show",
+        show_title: showTitle || "",
         language: pendingManualRun.context.language,
         target_audience: pendingManualRun.context.targetAudience.trim() || null,
         candidates: toScoreCandidates(pendingManualRun.candidates),
@@ -874,10 +995,14 @@ export default function App() {
               setParsedEpisodes(episodes);
               setRankedPromos([]);
               setWhyTop3([]);
+              setWhyTop10([]);
+              setAllCandidatesByEpisode({});
               setRunSummary(EMPTY_RUN_SUMMARY);
               setRunRecord(null);
               sessionStorage.removeItem("pf-ranked-promos");
               sessionStorage.removeItem("pf-why-top3");
+              sessionStorage.removeItem("pf-why-top10");
+              sessionStorage.removeItem("pf-all-candidates-by-ep");
               sessionStorage.removeItem("pf-run-summary");
               sessionStorage.removeItem("pf-approved-candidates");
               sessionStorage.removeItem("pf-run-record");
@@ -917,6 +1042,8 @@ export default function App() {
             promos={rankedPromos}
             episodes={parsedEpisodes}
             whyTop3={whyTop3}
+            whyTop10={whyTop10}
+            allCandidatesByEpisode={allCandidatesByEpisode}
             showTitle={showTitle}
             runRecord={runRecord}
             onUpdatePromoStatus={handleUpdatePromoStatus}

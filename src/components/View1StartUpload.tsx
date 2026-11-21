@@ -473,6 +473,26 @@ export function View1StartUpload({
           )}
 
           <div className="pt-2">
+            {parsedEpisodes.length > 1 ? (
+              <div className="mb-2 p-2.5 rounded-lg bg-purple-950/40 border border-purple-500/30 text-[11px] text-purple-200">
+                <div className="font-semibold text-purple-300 flex items-center gap-1.5">
+                  <Sparkles size={12} className="text-purple-400" />
+                  Series Mode Active ({parsedEpisodes.length} Episodes)
+                </div>
+                <div className="text-neutral-400 mt-0.5">
+                  Generates 4–5 cuts per episode with rules (~{parsedEpisodes.length * 5} candidates), resolves series character aliases, scores top 70 with model, and outputs a quality-thresholded global campaign ranking with per-episode drill-down.
+                </div>
+              </div>
+            ) : parsedEpisodes.length === 1 ? (
+              <div className="mb-2 p-2.5 rounded-lg bg-blue-950/40 border border-blue-500/30 text-[11px] text-blue-200">
+                <div className="font-semibold text-blue-300">
+                  Episode Mode Active (Single Episode)
+                </div>
+                <div className="text-neutral-400 mt-0.5">
+                  Ranks top 3 promo cuts within this episode.
+                </div>
+              </div>
+            ) : null}
             <button
               type="button"
               disabled={
@@ -490,7 +510,9 @@ export function View1StartUpload({
               <span>
                 {modelSettings.provider === "no-api"
                   ? `Generate Prompt (${parsedEpisodes.length} eps)`
-                  : `Run Discovery Pipeline (${parsedEpisodes.length} eps)`}
+                  : parsedEpisodes.length > 1
+                    ? `Run Series Discovery (${parsedEpisodes.length} eps)`
+                    : `Run Discovery Pipeline (${parsedEpisodes.length} ep)`}
               </span>
               <ArrowRight size={16} />
             </button>
@@ -510,6 +532,19 @@ export function View1StartUpload({
             <span className="text-xs px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-300 border border-neutral-700">
               {parsedEpisodes.length} valid · {parseFailures.length} failed
             </span>
+            {parsedEpisodes.length > 0 && (
+              <span
+                className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${
+                  parsedEpisodes.length > 1
+                    ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
+                    : "bg-blue-500/20 text-blue-300 border-blue-500/40"
+                }`}
+              >
+                {parsedEpisodes.length > 1
+                  ? `Series Mode: ${parsedEpisodes.length} Episodes`
+                  : "Episode Mode: 1 Episode"}
+              </span>
+            )}
           </div>
           {(parsedEpisodes.length > 0 || parseFailures.length > 0) && (
             <button

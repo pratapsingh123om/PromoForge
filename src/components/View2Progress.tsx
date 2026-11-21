@@ -54,6 +54,10 @@ export function View2Progress({
   const completedCount = Object.values(progressStates).filter(
     (s) => s.status === "done"
   ).length;
+  const totalCandidatesDiscovered = Object.values(progressStates).reduce(
+    (sum, s) => sum + (s.candidates_found || 0),
+    0
+  );
   const progressPercent =
     episodes.length > 0
       ? Math.round((completedCount / episodes.length) * 100)
@@ -65,9 +69,20 @@ export function View2Progress({
       <div className="p-5 rounded-xl bg-neutral-900 border border-neutral-800">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 mb-2">
-              <Cpu size={12} />
-              View 2: Pipeline Execution & Stage Telemetry
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                <Cpu size={12} />
+                View 2: Pipeline Execution & Stage Telemetry
+              </div>
+              {episodes.length > 1 ? (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                  Series Mode ({episodes.length} Episodes)
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                  Episode Mode (1 Episode)
+                </span>
+              )}
             </div>
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
               {isRunning ? (
@@ -97,7 +112,9 @@ export function View2Progress({
                 ? "Candidate generation is complete. The run will continue only after the pasted model JSON passes schema and candidate-ID validation."
                 : wasCancelled
                 ? "Processing stopped at the requested checkpoint. Any candidates already computed remain available."
-                : `Processing ${episodes.length} episode(s) through parse, candidate windowing, hard checks, de-conflict, and global variety ranking.`}
+                : episodes.length > 1
+                ? `Series mode: Processing ${episodes.length} episodes through candidate discovery (~${episodes.length * 5} cuts), series alias resolution, model scoring shortlist, and global quality ranking.`
+                : `Episode mode: Processing ${episodes.length} episode through candidate discovery, checks, and ranking.`}
             </p>
           </div>
 
@@ -161,10 +178,10 @@ export function View2Progress({
           <div className="p-3 rounded-lg bg-neutral-950 border border-neutral-800/60">
             <div className="flex items-center gap-1.5 text-xs text-neutral-400">
               <ShieldCheck size={13} className="text-blue-400" />
-              <span>Episodes Done</span>
+              <span>Episodes / Cuts Found</span>
             </div>
             <div className="text-lg font-bold text-white mt-1 font-mono">
-              {completedCount} / {episodes.length} ({progressPercent}%)
+              {completedCount}/{episodes.length} <span className="text-xs text-neutral-400 font-normal">({totalCandidatesDiscovered} cuts)</span>
             </div>
           </div>
         </div>

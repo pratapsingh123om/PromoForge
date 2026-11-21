@@ -146,6 +146,43 @@ check("4.1–4.10 pipeline invariants", () => {
   return `${ranked.length} global promos, sequential ranks, zero invariant failures`;
 });
 
+check("H1-H9 explicit assertion suite and no mid-reply start", () => {
+  for (const promo of ranked) {
+    const episode = validEpisodes.find((item) => item.episode_id === promo.episode);
+    const seg = promo.segments[0];
+    assert.ok(promo.duration_seconds >= 20 && promo.duration_seconds <= 60, "H1 duration failed");
+    assert.ok(episode.events.some((event) => event.start_ms === seg.start_ms), "H2 start timestamp missing");
+    assert.ok(episode.events.some((event) => event.end_ms === seg.end_ms), "H2 end timestamp missing");
+    assert.ok(seg.start_ms < seg.end_ms, "H3 slice error");
+    assert.ok(!isSentenceFragment(promo.hook_line), "H4 fragment start");
+    assert.ok(seg.end_ms <= episode.duration_ms, "H5 beyond episode duration");
+    assert.ok(promo.candidate_key && promo.hook_line && promo.cliffhanger_line && promo.why_it_works && promo.global_rank, "H8 missing fields");
+    assert.ok(promo.transcript_lines.some((line) => line.is_hook && line.text === promo.hook_line), "H9 hook mismatch");
+    assert.ok(promo.transcript_lines.some((line) => line.is_cliffhanger && line.text === promo.cliffhanger_line), "H9 cliffhanger mismatch");
+    // Mid-reply check: no promo starts on a reply whose question is outside the cut
+    const startEv = episode.events.find((ev) => ev.start_ms === seg.start_ms);
+    const startIdx = episode.events.indexOf(startEv);
+    if (startIdx > 0) {
+      const prev = episode.events[startIdx - 1];
+      if (prev.type === "dialogue" && prev.text.trim().endsWith("?") && startEv.start_ms - prev.end_ms <= 3500) {
+        assert.fail(`Promo ${promo.candidate_key} starts on a reply whose question is outside the cut`);
+      }
+    }
+  }
+  for (let left = 0; left < ranked.length; left += 1) {
+    for (let right = left + 1; right < ranked.length; right += 1) {
+      if (ranked[left].episode !== ranked[right].episode) continue;
+      const a = ranked[left].segments[0];
+      const b = ranked[right].segments[0];
+      const overlap = Math.max(0, Math.min(a.end_ms, b.end_ms) - Math.max(a.start_ms, b.start_ms));
+      const shorter = Math.min(a.end_ms - a.start_ms, b.end_ms - b.start_ms);
+      assert.ok(overlap / shorter <= 0.2, "H6 overlap > 20%");
+      assert.ok(Math.abs(a.start_ms - b.end_ms) > 3500 && Math.abs(b.start_ms - a.end_ms) > 3500, "H7 continuation spoiler");
+    }
+  }
+  return "All promos pass H1-H9 and mid-reply constraints";
+});
+
 check("4.11 reasons are clip-specific", () => {
   assert.ok(ranked.every((promo) => promo.why_it_works.split(/\s+/).length >= 8));
   assert.ok(ranked.every((promo) => !/^score\s+\d+/i.test(promo.why_it_works)));

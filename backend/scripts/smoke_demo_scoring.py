@@ -36,7 +36,7 @@ def payload() -> dict:
         }
     ]
     return {
-        "show_title": "The Sterling Takeover",
+        "show_title": "Thorne Banquet Sample",
         "language": "en",
         "target_audience": "vertical microdrama viewers",
         "candidates": candidates,

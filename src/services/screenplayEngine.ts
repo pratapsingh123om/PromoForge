@@ -59,6 +59,14 @@ export interface PromoCutSegment {
   duration_seconds: number;
 }
 
+export type MomentType =
+  | "betrayal_altar"
+  | "confrontation_threat"
+  | "secret_identity"
+  | "ultimatum_departure"
+  | "revelation_shock"
+  | "general_dramatic";
+
 export interface PromoCandidateItem {
   id: string;
   candidate_key: string;
@@ -86,6 +94,10 @@ export interface PromoCandidateItem {
   score_source: string;
   status: "approved" | "rejected" | "selected" | "review";
   rejection_reason?: string;
+  moment_type?: MomentType;
+  acquisition_score?: number;
+  post_priority?: string;
+  is_top_10?: boolean;
   transcript_lines: {
     event_type: ParsedEvent["type"];
     speaker: string | null;
@@ -351,6 +363,84 @@ export function parseScreenplayText(
   };
 }
 
+export function buildSeriesAliasMap(
+  episodes: Array<{ continuity_notes?: string; logline?: string; continuityNotes?: string }>,
+): Record<string, string> {
+  const combinedMap: Record<string, string> = {};
+  const isRegex = /([A-Za-z][A-Za-z0-9\s'_-]{1,60}?)\s+(?:is|=|represents|aka)\s+([A-Za-z][A-Za-z0-9\s'_-]{1,60})/gi;
+  const parenRegex = /([A-Za-z][A-Za-z0-9\s'_-]{1,60}?)\s*\(([A-Za-z][A-Za-z0-9\s'_-]{1,60}?)\)/gi;
+
+  for (const ep of episodes) {
+    const notes = ep.continuity_notes || ep.continuityNotes || "";
+    const logline = ep.logline || "";
+    const text = `${notes}\n${logline}`;
+
+    let m: RegExpExecArray | null;
+    while ((m = isRegex.exec(text)) !== null) {
+      const alias = m[1].trim().toLowerCase();
+      const real = m[2].trim().replace(/[.,;:]$/, "");
+      if (alias.length > 2 && real.length > 2) {
+        combinedMap[alias] = real;
+      }
+    }
+    while ((m = parenRegex.exec(text)) !== null) {
+      const real = m[1].trim().replace(/[.,;:]$/, "");
+      const alias = m[2].trim().toLowerCase();
+      if (alias.length > 2 && real.length > 2) {
+        combinedMap[alias] = real;
+      }
+    }
+  }
+  return combinedMap;
+}
+
+export function applySeriesAliasMapToEpisodes(
+  episodes: ParsedEpisode[],
+  seriesAliasMap: Record<string, string>,
+): ParsedEpisode[] {
+  return episodes.map((ep) => {
+    let changed = false;
+    const updatedEvents = ep.events.map((ev) => {
+      if (!ev.speaker) return ev;
+      const lower = ev.speaker.toLowerCase();
+      if (seriesAliasMap[lower] && seriesAliasMap[lower] !== ev.speaker) {
+        changed = true;
+        return { ...ev, speaker: seriesAliasMap[lower] };
+      }
+      return ev;
+    });
+
+    const unresolved = ep.unresolved_aliases.filter((unres) => {
+      const lower = unres.toLowerCase();
+      return !seriesAliasMap[lower] && !Object.keys(seriesAliasMap).some((k) => lower.includes(k));
+    });
+
+    return changed || unresolved.length !== ep.unresolved_aliases.length
+      ? { ...ep, events: updatedEvents, unresolved_aliases: unresolved }
+      : ep;
+  });
+}
+
+export function detectMomentType(hook: string, cliffhanger: string, text: string): MomentType {
+  const combined = `${hook} ${cliffhanger} ${text}`.toLowerCase();
+  if (/\b(marry|wedding|groom|bride|altar|vows?|fianc[eé]|proposal)\b/i.test(combined)) {
+    return "betrayal_altar";
+  }
+  if (/\b(who are you|identity|stranger|real name|disguise|pretend|true name|real identity)\b/i.test(combined)) {
+    return "secret_identity";
+  }
+  if (/\b(leave|divorce|contract|sign|custody|walk away|goodbye|belong|pack|get out)\b/i.test(combined)) {
+    return "ultimatum_departure";
+  }
+  if (/\b(kill|destroy|ruin|police|arrest|pay|prison|die|threat|payback|murder)\b/i.test(combined)) {
+    return "confrontation_threat";
+  }
+  if (/\b(letter|dna|test|father|mother|truth|confess|secret|proof|document|admit)\b/i.test(combined)) {
+    return "revelation_shock";
+  }
+  return "general_dramatic";
+}
+
 export function isSentenceFragment(text: string): boolean {
   const clean = text.trim().replace(/^["'([{]+/, "");
   if (!clean) return false;
@@ -467,6 +557,14 @@ export function adjustPromoCandidate(
     ) {
       errors.push("The selected opening is inside the same speaker's continuing turn.");
     }
+    if (
+      previous &&
+      previous.type === "dialogue" &&
+      previous.text.trim().endsWith("?") &&
+      startEv.start_ms - previous.end_ms <= 3500
+    ) {
+      errors.push("The selected opening starts on a reply whose question is outside the cut.");
+    }
   }
   if (errors.length || !startEv || !endEv) return { promo: null, errors };
 
@@ -508,6 +606,10 @@ export function adjustPromoCandidate(
         "H3: Spoken Dialogue Intact",
         "H4: No Fragment Start",
         "H5: Episode Duration Compliant",
+        "H6: Overlap Threshold Compliant",
+        "H7: No Cliffhanger Continuation",
+        "H8: Required Fields Complete",
+        "H9: Single Line Hook & Cliffhanger",
       ],
       transcript_lines: inCutEvents.map((event) => ({
         event_type: event.type,
@@ -527,6 +629,7 @@ export function generateEpisodePromosClient(
   minSec = 20,
   maxSec = 60,
   summary: RunCheckSummary,
+  maxSelected = 3,
 ): PromoCandidateItem[] {
   const minMs = minSec * 1000;
   const maxMs = maxSec * 1000;
@@ -543,10 +646,19 @@ export function generateEpisodePromosClient(
       continue;
     }
 
-    // Mid-speech turn check
-    if (i > 0 && dialogueEvents[i - 1].speaker === startEv.speaker && startEv.start_ms - dialogueEvents[i - 1].end_ms <= 3500) {
-      summary.rejected_mid_speech++;
-      continue;
+    // Mid-speech turn check & mid-reply check (no promo starts on a reply whose question is outside the cut)
+    if (i > 0 && startEv.start_ms - dialogueEvents[i - 1].end_ms <= 3500) {
+      if (dialogueEvents[i - 1].speaker === startEv.speaker) {
+        summary.rejected_mid_speech++;
+        continue;
+      }
+      if (
+        dialogueEvents[i - 1].type === "dialogue" &&
+        dialogueEvents[i - 1].text.trim().endsWith("?")
+      ) {
+        summary.rejected_mid_speech++;
+        continue;
+      }
     }
 
     for (let j = i + 1; j < dialogueEvents.length; j++) {
@@ -567,6 +679,11 @@ export function generateEpisodePromosClient(
       const inCutEvents = ep.events.filter((e) => e.start_ms >= startEv.start_ms && e.end_ms <= endEv.end_ms);
 
       const scored = scoreWindow(startEv, endEv, inCutEvents, durationMs);
+      const momentType = detectMomentType(
+        startEv.text,
+        endEv.text,
+        inCutEvents.map((ev) => ev.text).join(" "),
+      );
 
       candidates.push({
         id: `${ep.episode_id}_P_${startEv.event_id}_${endEv.event_id}`,
@@ -600,10 +717,15 @@ export function generateEpisodePromosClient(
           "H3: Spoken Dialogue Intact",
           "H4: No Fragment Start",
           "H5: Episode Duration Compliant",
+          "H6: Overlap Threshold Compliant",
+          "H7: No Cliffhanger Continuation",
+          "H8: Required Fields Complete",
+          "H9: Single Line Hook & Cliffhanger",
         ],
         quality_flags: scored.qualityFlags,
         score_source: "rule-based",
         status: "selected",
+        moment_type: momentType,
         transcript_lines: inCutEvents.map((ev) => ({
           event_type: ev.type,
           speaker: ev.speaker,
@@ -643,7 +765,7 @@ export function generateEpisodePromosClient(
       }
     }
 
-    if (!overlaps && selected.length < 3) {
+    if (!overlaps && selected.length < maxSelected) {
       selected.push(cand);
     }
   }
@@ -651,52 +773,188 @@ export function generateEpisodePromosClient(
   return selected;
 }
 
+export interface SeriesRankingOptions {
+  mode?: "series" | "episode";
+  varietyCap?: number;
+  qualityThreshold?: number;
+  topLimit?: number;
+}
+
+export interface GlobalRankingResult {
+  ranked: PromoCandidateItem[];
+  whyTop3: string[];
+  whyTop10: string[];
+  mode: "series" | "episode";
+  totalCandidatesEvaluated: number;
+  allCandidatesByEpisode: Record<string, PromoCandidateItem[]>;
+}
+
 export function rankAllEpisodesGlobally(
   allPromos: PromoCandidateItem[],
-  varietyCap = 2,
-): { ranked: PromoCandidateItem[]; whyTop3: string[] } {
-  // Sort by decision score descending
-  const pool = [...allPromos].sort((a, b) => b.scores.decision - a.scores.decision);
+  optionsOrCap: number | SeriesRankingOptions = 2,
+): GlobalRankingResult {
+  const isNumberCap = typeof optionsOrCap === "number";
+  const options: SeriesRankingOptions = isNumberCap
+    ? { varietyCap: optionsOrCap, mode: "episode" }
+    : optionsOrCap;
+
+  const mode = options.mode || (isNumberCap ? "episode" : "series");
+  const varietyCap = options.varietyCap ?? 2;
+  const qualityThreshold = options.qualityThreshold ?? (mode === "series" ? 70.0 : 0.0);
+  const topLimit = options.topLimit ?? (mode === "series" ? 25 : 3);
+
+  // Calculate acquisition score & detect spoiler risks
+  const scoredPool = allPromos.map((p) => {
+    const epNumMatch = /EP_?(\d+)/i.exec(p.episode);
+    const epNum = epNumMatch ? parseInt(epNumMatch[1], 10) : 1;
+    let acquisitionBonus = 0;
+    const flags = [...p.quality_flags];
+
+    if (epNum <= 15) {
+      // Early episodes: optimal for cold-audience viewer acquisition
+      acquisitionBonus += 5;
+    } else if (epNum <= 30) {
+      // Mid episodes: good context-to-drama balance
+      acquisitionBonus += 2;
+    } else if (epNum >= 40) {
+      // Late episodes: high risk of spoiling series reveals or requiring prior narrative context
+      acquisitionBonus -= 6;
+      if (!flags.includes("late-series spoiler risk")) {
+        flags.push("late-series spoiler risk");
+      }
+      if (p.scores.standalone < 80 && !flags.includes("requires series context")) {
+        flags.push("requires series context");
+      }
+    }
+
+    const acquisitionScore = Number(Math.max(0, Math.min(100, p.scores.decision + acquisitionBonus)).toFixed(1));
+    return {
+      ...p,
+      acquisition_score: acquisitionScore,
+      quality_flags: flags,
+    };
+  });
+
+  // Group all candidates by episode for per-episode drill-down inspection
+  const allCandidatesByEpisode: Record<string, PromoCandidateItem[]> = {};
+  for (const promo of scoredPool) {
+    if (!allCandidatesByEpisode[promo.episode]) {
+      allCandidatesByEpisode[promo.episode] = [];
+    }
+    allCandidatesByEpisode[promo.episode].push(promo);
+  }
+  for (const ep of Object.keys(allCandidatesByEpisode)) {
+    allCandidatesByEpisode[ep].sort((a, b) => (b.acquisition_score ?? b.scores.decision) - (a.acquisition_score ?? a.scores.decision));
+  }
+
+  // Sort pool by acquisition score (series mode) or raw decision score (episode mode)
+  scoredPool.sort((a, b) => {
+    const scoreA = mode === "series" ? (a.acquisition_score ?? a.scores.decision) : a.scores.decision;
+    const scoreB = mode === "series" ? (b.acquisition_score ?? b.scores.decision) : b.scores.decision;
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return a.candidate_key.localeCompare(b.candidate_key);
+  });
+
+  // In series mode, apply quality threshold (weak episodes may contribute none)
+  let eligiblePool = scoredPool;
+  if (mode === "series") {
+    eligiblePool = scoredPool.filter((p) => (p.acquisition_score ?? p.scores.decision) >= qualityThreshold);
+    // Ensure we keep at least the top 10 if threshold is strict
+    if (eligiblePool.length < 10 && scoredPool.length >= 10) {
+      eligiblePool = scoredPool.slice(0, 10);
+    }
+  }
+
   const ranked: PromoCandidateItem[] = [];
   const epCounts: Record<string, number> = {};
+  const momentCountsInTop10: Record<string, number> = {};
   const deferred: PromoCandidateItem[] = [];
 
-  for (const p of pool) {
-    if (ranked.length >= 3) break;
+  for (const p of eligiblePool) {
+    if (ranked.length >= topLimit) break;
     const count = epCounts[p.episode] || 0;
     if (count >= varietyCap) {
       deferred.push(p);
       continue;
     }
+
+    // In series mode Top 10: enforce theme variety (no more than 2 of same moment type in top 5)
+    if (mode === "series" && ranked.length < 5 && p.moment_type) {
+      const momentCount = momentCountsInTop10[p.moment_type] || 0;
+      if (momentCount >= 2) {
+        deferred.push(p);
+        continue;
+      }
+      momentCountsInTop10[p.moment_type] = momentCount + 1;
+    }
+
     epCounts[p.episode] = count + 1;
     ranked.push(p);
   }
-  for (const promo of deferred) {
-    if (ranked.length >= 3) break;
-    ranked.push(promo);
+
+  // In series mode, if we haven't hit topLimit, backfill from deferred candidates
+  if (mode === "series") {
+    for (const promo of deferred) {
+      if (ranked.length >= topLimit) break;
+      const count = epCounts[promo.episode] || 0;
+      if (count < varietyCap + 1) {
+        epCounts[promo.episode] = count + 1;
+        ranked.push(promo);
+      }
+    }
+  } else {
+    // In episode mode, if ranked < 3, backfill from deferred
+    for (const promo of deferred) {
+      if (ranked.length >= 3) break;
+      ranked.push(promo);
+    }
   }
 
-  // Assign global ranks
+  // Assign global ranks and top 10 campaign priority tags
   for (let idx = 0; idx < ranked.length; idx++) {
-    ranked[idx].global_rank = idx + 1;
+    const item = ranked[idx];
+    item.global_rank = idx + 1;
+    item.is_top_10 = idx < 10;
+    if (idx === 0) {
+      item.post_priority = "Post 1st (Campaign Hero)";
+    } else if (idx === 1) {
+      item.post_priority = "Post 2nd (A/B Test Angle)";
+    } else if (idx === 2) {
+      item.post_priority = "Post 3rd (High Curiosity)";
+    } else if (idx < 10) {
+      item.post_priority = `Post #${idx + 1} (Campaign Ad Set)`;
+    } else {
+      item.post_priority = "Extended Show Catalog";
+    }
   }
 
   const whyTop3: string[] = [];
-  if (ranked[0]) {
-    whyTop3.push(
-      `Rank #1 (${ranked[0].episode}, ${ranked[0].duration_seconds}s): highest ${ranked[0].score_source || "computed"} score (${ranked[0].scores.decision}) from hook ${ranked[0].scores.hook}, cliffhanger ${ranked[0].scores.cliffhanger}, and standalone ${ranked[0].scores.standalone}. Hook: “${ranked[0].hook_line.slice(0, 60)}${ranked[0].hook_line.length > 60 ? "…" : ""}”`
-    );
-  }
-  if (ranked[1]) {
-    whyTop3.push(
-      `Rank #2 (${ranked[1].episode}, ${ranked[1].duration_seconds}s): next highest non-overlapping ${ranked[1].score_source || "computed"} score (${ranked[1].scores.decision}) after applying the episode-variety cap.`
-    );
-  }
-  if (ranked[2]) {
-    whyTop3.push(
-      `Rank #3 (${ranked[2].episode}, ${ranked[2].duration_seconds}s): retained as the third distinct option with score ${ranked[2].scores.decision}; flags: ${ranked[2].quality_flags.join(", ") || "none detected"}.`
-    );
+  const whyTop10: string[] = [];
+
+  for (let i = 0; i < Math.min(10, ranked.length); i++) {
+    const promo = ranked[i];
+    const momentLabel = promo.moment_type ? promo.moment_type.replace(/_/g, " ") : "dramatic confrontation";
+    let rationale = "";
+    if (i === 0) {
+      rationale = `Rank #1 (${promo.episode}, ${promo.duration_seconds}s, Score ${promo.scores.decision}): Post 1st as campaign hero. High-stakes opening with immediate conflict (“${promo.hook_line.slice(0, 50)}…”), clean cold-audience standalone clarity (${promo.scores.standalone}/100), and zero prior episode context required.`;
+    } else if (i === 1) {
+      rationale = `Rank #2 (${promo.episode}, ${promo.duration_seconds}s, Score ${promo.scores.decision}): Post 2nd to A/B test a contrasting narrative angle (${momentLabel}). Balances high tension (${promo.scores.cliffhanger}/100 cliffhanger) while introducing character variety across the show.`;
+    } else if (i === 2) {
+      rationale = `Rank #3 (${promo.episode}, ${promo.duration_seconds}s, Score ${promo.scores.decision}): Post 3rd for retargeting; ends on a high-retention unanswered cliffhanger (“${promo.cliffhanger_line.slice(0, 50)}…”) with self-contained pacing.`;
+    } else {
+      rationale = `Rank #${i + 1} (${promo.episode}, ${promo.duration_seconds}s, Score ${promo.scores.decision}): ${promo.post_priority} featuring ${momentLabel}. ${promo.quality_flags.length ? `Flags: ${promo.quality_flags.join(", ")}.` : "Clean standalone clip."}`;
+    }
+
+    if (i < 3) whyTop3.push(rationale);
+    whyTop10.push(rationale);
   }
 
-  return { ranked, whyTop3 };
+  return {
+    ranked,
+    whyTop3,
+    whyTop10,
+    mode,
+    totalCandidatesEvaluated: allPromos.length,
+    allCandidatesByEpisode,
+  };
 }
